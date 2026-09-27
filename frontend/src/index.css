@@ -1,0 +1,42 @@
+:root {
+  --bg-base: #f6f8fc;
+  --bg-surface: #ffffff;
+  --text-primary: #1f1f1f;
+  --text-muted: #5f6368;
+  --accent-primary: #0b57d0;
+  --border-default: #dadce0;
+  --state-error: #b3261e;
+  --state-success: #188038;
+  --font-sans: Arial, Roboto, system-ui, sans-serif;
+  --font-mono: ui-monospace, Consolas, monospace;
+
+  font: 18px/145% var(--font-sans);
+  color: var(--text-primary);
+  background: var(--bg-base);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100svh;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100svh;
+}
+
+h1 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: clamp(40px, 8vw, 72px);
+  font-weight: 500;
+  line-height: 1.1;
+}

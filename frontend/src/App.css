@@ -1,0 +1,7 @@
+.app-shell {
+  display: flex;
+  min-height: 100svh;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
