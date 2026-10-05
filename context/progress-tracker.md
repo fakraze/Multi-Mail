@@ -4,11 +4,11 @@ Update this file after every meaningful implementation change.
 
 ## Current Phase
 
-- Main mail page frontend
+- Main mail and login page navigation
 
 ## Current Goal
 
-- Build the main mail page layout described in `feature-specs/02-main-page.md`.
+- Start on the main mail page and open the login page from Connect Gmail.
 
 ## Completed
 
@@ -27,6 +27,11 @@ Update this file after every meaningful implementation change.
 - Verified the main mail page, including the navigation update, with `npm run lint` and `npm run build`.
 - Added Inbox and Starred navigation plus an expandable Labels list. Navigation filters the sample mail, and account checkboxes now filter the same sample list.
 - Added sample star and label metadata so Starred and label views have distinct results. Select-all now applies to visible mail and shows a partial-selection state.
+- Added a centered login page with the Multi Mail title, a short description, and a Continue with Google button using the existing light theme and button component.
+- Moved the sample inbox into a page component. The initial login page flow used Continue with Google to open that preview and explain that Google sign-in was not connected yet.
+- Verified the login page implementation with `npm run lint` and `npm run build`.
+- Changed the frontend start page back to the sample inbox. Connect Gmail now opens the login page; Continue with Google returns to the inbox with a placeholder notice.
+- Verified the updated page flow with `npm run lint` and `npm run build`.
 
 ## In Progress
 
@@ -47,4 +52,4 @@ Update this file after every meaningful implementation change.
 
 ## Session Notes
 
-- The React app renders the main mail page using sample accounts and messages. Folder, label, and account filtering runs only against sample data. Gmail actions remain a frontend preview because this repository has no backend yet.
+- The React app starts on the main mail page. Connect Gmail opens the login page, and Continue with Google returns to the sample inbox with a notice that Google sign-in is not connected. Folder, label, and account filtering still runs only against sample data. Gmail actions remain a frontend preview because this repository has no backend yet.

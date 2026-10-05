@@ -1,0 +1,49 @@
+.login-shell {
+  display: grid;
+  min-height: 100svh;
+  place-items: center;
+  padding: 24px;
+  background: var(--bg-base);
+}
+
+.login-panel {
+  display: flex;
+  width: min(100%, 420px);
+  flex-direction: column;
+  align-items: center;
+  padding: 48px 32px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xl);
+  background: var(--bg-surface);
+  text-align: center;
+}
+
+.login-icon {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  margin-bottom: 24px;
+  border-radius: var(--radius-md);
+  background: var(--bg-base);
+  color: var(--accent-primary);
+}
+
+.login-panel h1 {
+  color: var(--text-primary);
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.login-panel p {
+  max-width: 300px;
+  margin-top: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.login-button {
+  width: 100%;
+  margin-top: 32px;
+}
