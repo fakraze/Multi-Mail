@@ -1,0 +1,103 @@
+import json
+import os
+from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode, urlsplit
+from urllib.request import Request, urlopen
+
+AUTHORIZATION_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+TOKEN_URL = "https://oauth2.googleapis.com/token"
+GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.modify"
+DEFAULT_REDIRECT_URI = "http://127.0.0.1:8000/auth/google/callback"
+DOTENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+
+
+class OAuthConfigError(Exception):
+    pass
+
+
+class OAuthExchangeError(Exception):
+    pass
+
+
+def local_settings() -> dict[str, str]:
+    try:
+        lines = DOTENV_FILE.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return {}
+
+    settings = {}
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key, value = key.strip(), value.strip()
+        if key in {"GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI"}:
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+                value = value[1:-1]
+            settings[key] = value
+    return settings
+
+
+def configuration() -> tuple[str, str, str]:
+    settings = local_settings()
+    client_id = os.getenv("GOOGLE_CLIENT_ID", settings.get("GOOGLE_CLIENT_ID", "")).strip()
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET", settings.get("GOOGLE_CLIENT_SECRET", "")).strip()
+    redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", settings.get("GOOGLE_REDIRECT_URI", DEFAULT_REDIRECT_URI)).strip()
+    parsed = urlsplit(redirect_uri)
+
+    if not client_id or not client_secret:
+        raise OAuthConfigError("Google OAuth client credentials are not configured.")
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname not in {"localhost", "127.0.0.1", "::1"}
+        or parsed.path != "/auth/google/callback"
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise OAuthConfigError("Google OAuth redirect URI must use the local callback URL.")
+    return client_id, client_secret, redirect_uri
+
+
+def authorization_url(client_id: str, redirect_uri: str, state: str) -> str:
+    query = urlencode(
+        {
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": GMAIL_SCOPE,
+            "access_type": "offline",
+            "state": state,
+        }
+    )
+    return f"{AUTHORIZATION_URL}?{query}"
+
+
+def exchange_code(code: str, client_id: str, client_secret: str, redirect_uri: str) -> bool:
+    body = urlencode(
+        {
+            "code": code,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uri": redirect_uri,
+            "grant_type": "authorization_code",
+        }
+    ).encode("ascii")
+    request = Request(
+        TOKEN_URL,
+        data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=10) as response:
+            tokens = json.load(response)
+    except (HTTPError, URLError, TimeoutError, ValueError, OSError) as exc:
+        raise OAuthExchangeError("Google token exchange failed.") from exc
+
+    if not isinstance(tokens, dict) or not isinstance(tokens.get("access_token"), str) or not tokens["access_token"]:
+        raise OAuthExchangeError("Google did not return an access token.")
+    return bool(tokens.get("refresh_token"))
