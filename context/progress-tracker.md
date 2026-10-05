@@ -4,11 +4,11 @@ Update this file after every meaningful implementation change.
 
 ## Current Phase
 
-- Frontend cleanup
+- Frontend design system setup
 
 ## Current Goal
 
-- Clear the React starter UI and show a centered `Multi Mail` title.
+- Set up the base Gmail-inspired UI system with shadcn/ui-compatible components.
 
 ## Completed
 
@@ -17,23 +17,28 @@ Update this file after every meaningful implementation change.
 - Removed unused Vite starter image and SVG assets, including the default favicon reference.
 - Initialized project Git tracking setup with ignore rules for `tmp/` and `note.txt`.
 - Added workspace VS Code settings so the hidden `.git` folder can be shown in Explorer.
+- Installed Tailwind, Radix UI primitives, `lucide-react`, and shadcn/ui helper dependencies for the frontend.
+- Added shadcn/ui configuration, path aliases, global design tokens, and the base UI components: Button, Input, Checkbox, Dialog, DropdownMenu, Tooltip, ScrollArea, and Separator.
+- Updated the React preview screen to render the base UI components against the Gmail-inspired theme.
+- Verified the design system setup with `npm run lint` and `npm run build`.
 
 ## In Progress
 
-- None yet.
+- None.
 
 ## Next Up
 
-- Define and implement the first MVP frontend feature unit.
+- Use the design system components to implement the first MVP frontend feature unit.
 
 ## Open Questions
 
-- None for this cleanup.
+- None for the design system setup.
 
 ## Architecture Decisions
 
-- No architecture or data model changes.
+- Frontend UI primitives live under `frontend/src/components/ui/` and use token-backed Tailwind classes with `frontend/src/lib/utils.ts` for class merging.
+- No backend architecture or data model changes.
 
 ## Session Notes
 
-- The React app currently renders only centered text: `Multi Mail`; no starter SVG/image assets remain in source or public folders.
+- The React app now renders a compact design-system preview for the Gmail-like shell so base components can be imported and exercised.

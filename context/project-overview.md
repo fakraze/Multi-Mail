@@ -59,18 +59,6 @@ Multi mail is a interface that user can check and manage their mail from multipl
 
 ### In Scope
 
-- [What you are building]
-- [What you are building]
-
-### Out of Scope
-
-- [What you are explicitly not building]
-- [What you are explicitly not building]
-
-## Scope
-
-### In Scope
-
 - Connect and disconnect multiple Gmail accounts using Google OAuth 2.0.
 - Display emails from selected Gmail accounts in a unified inbox.
 - Sort emails chronologically.
