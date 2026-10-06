@@ -38,8 +38,9 @@
 - The frontend navigates to `GET /auth/google/start` on the local FastAPI backend.
 - The backend redirects to Google with the `gmail.modify` scope, offline access, and a random state value held in a short-lived, HTTP-only, SameSite=Lax cookie.
 - Google redirects to `GET /auth/google/callback` at the configured loopback URL. The backend checks state, exchanges the authorization code, and logs only whether access and refresh tokens were returned.
-- The callback displays a token-free success or error page. Tokens remain in memory only for the exchange and are not saved to SQLite or sent to the frontend. The local backend launcher disables request access logs so callback authorization codes are not logged; direct Uvicorn runs must use `--no-access-log`.
+- The callback displays a token-free success or error page. For the local token-storage step, the backend saves the latest authorization's access token and optional refresh token to an ignored local JSON file. Tokens are never saved to SQLite or sent to the frontend. Saving a new grant replaces the previous file, including when Google omits a refresh token. The local backend launcher disables request access logs so callback authorization codes are not logged; direct Uvicorn runs must use `--no-access-log`.
 - Local configuration uses `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and a loopback `GOOGLE_REDIRECT_URI` from backend environment variables or an ignored `backend/.env` file. Environment variables take precedence. The default callback is `http://127.0.0.1:8000/auth/google/callback`; the frontend backend base URL defaults to `http://127.0.0.1:8000`.
+- The local token file is `backend/oauth_tokens.json`. It is backend-only, ignored by Git, written atomically with restrictive file permissions where supported, and contains only the latest grant. It is a temporary single-account store; multi-account persistence remains a later feature.
 
 ## Invariants
 

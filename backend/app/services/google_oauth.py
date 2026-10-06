@@ -1,5 +1,7 @@
 import json
 import os
+import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
@@ -10,6 +12,7 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.modify"
 DEFAULT_REDIRECT_URI = "http://127.0.0.1:8000/auth/google/callback"
 DOTENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+TOKEN_FILE = Path(__file__).resolve().parents[2] / "oauth_tokens.json"
 
 
 class OAuthConfigError(Exception):
@@ -18,6 +21,16 @@ class OAuthConfigError(Exception):
 
 class OAuthExchangeError(Exception):
     pass
+
+
+class OAuthStorageError(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class OAuthTokens:
+    access_token: str
+    refresh_token: str | None
 
 
 def local_settings() -> dict[str, str]:
@@ -76,7 +89,7 @@ def authorization_url(client_id: str, redirect_uri: str, state: str) -> str:
     return f"{AUTHORIZATION_URL}?{query}"
 
 
-def exchange_code(code: str, client_id: str, client_secret: str, redirect_uri: str) -> bool:
+def exchange_code(code: str, client_id: str, client_secret: str, redirect_uri: str) -> OAuthTokens:
     body = urlencode(
         {
             "code": code,
@@ -100,4 +113,37 @@ def exchange_code(code: str, client_id: str, client_secret: str, redirect_uri: s
 
     if not isinstance(tokens, dict) or not isinstance(tokens.get("access_token"), str) or not tokens["access_token"]:
         raise OAuthExchangeError("Google did not return an access token.")
-    return bool(tokens.get("refresh_token"))
+    refresh_token = tokens.get("refresh_token")
+    return OAuthTokens(
+        access_token=tokens["access_token"],
+        refresh_token=refresh_token if isinstance(refresh_token, str) and refresh_token else None,
+    )
+
+
+def save_tokens(tokens: OAuthTokens) -> None:
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=TOKEN_FILE.parent,
+            prefix=".oauth_tokens-",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            os.chmod(temporary_path, 0o600)
+            json.dump(
+                {"access_token": tokens.access_token, "refresh_token": tokens.refresh_token},
+                temporary_file,
+            )
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        os.replace(temporary_path, TOKEN_FILE)
+    except OSError as exc:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise OAuthStorageError("Could not save Google OAuth tokens.") from exc

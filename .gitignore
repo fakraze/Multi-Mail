@@ -5,3 +5,5 @@ note.txt
 !.env.example
 __pycache__/
 *.pyc
+/backend/oauth_tokens.json
+/backend/.oauth_tokens-*.tmp

@@ -1,13 +1,24 @@
 import asyncio
 import io
+import json
 import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlsplit
 
 from app.api.google_oauth import callback, start
-from app.services.google_oauth import OAuthExchangeError, configuration, exchange_code
+from app.services.google_oauth import (
+    OAuthConfigError,
+    OAuthExchangeError,
+    OAuthStorageError,
+    OAuthTokens,
+    configuration,
+    exchange_code,
+    save_tokens,
+)
 
 
 class GoogleOAuthTests(unittest.TestCase):
@@ -30,11 +41,34 @@ class GoogleOAuthTests(unittest.TestCase):
         self.assertIn("httponly", response.headers["set-cookie"].lower())
         self.assertNotIn("test-secret", response.headers["location"])
 
-    def test_exchange_checks_token_presence_without_returning_value(self) -> None:
+    def test_exchange_returns_token_values_for_backend_storage(self) -> None:
         response = io.BytesIO(b'{"access_token":"private-value","refresh_token":"private-refresh"}')
         with patch("app.services.google_oauth.urlopen", return_value=response) as send:
-            self.assertTrue(exchange_code("code", "id", "secret", "http://127.0.0.1:8000/auth/google/callback"))
+            tokens = exchange_code("code", "id", "secret", "http://127.0.0.1:8000/auth/google/callback")
+        self.assertEqual(tokens, OAuthTokens("private-value", "private-refresh"))
         self.assertEqual(send.call_args.args[0].full_url, "https://oauth2.googleapis.com/token")
+
+    def test_save_tokens_replaces_previous_grant(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            token_file = Path(directory) / "oauth_tokens.json"
+            with patch("app.services.google_oauth.TOKEN_FILE", token_file):
+                save_tokens(OAuthTokens("old-access", "old-refresh"))
+                save_tokens(OAuthTokens("new-access", None))
+            self.assertEqual(
+                json.loads(token_file.read_text(encoding="utf-8")),
+                {"access_token": "new-access", "refresh_token": None},
+            )
+
+    def test_save_failure_preserves_existing_grant(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            token_file = Path(directory) / "oauth_tokens.json"
+            token_file.write_text('{"access_token":"old-access"}', encoding="utf-8")
+            with patch("app.services.google_oauth.TOKEN_FILE", token_file):
+                with patch("app.services.google_oauth.os.replace", side_effect=OSError("disk error")):
+                    with self.assertRaises(OAuthStorageError):
+                        save_tokens(OAuthTokens("new-access", "new-refresh"))
+            self.assertEqual(json.loads(token_file.read_text(encoding="utf-8")), {"access_token": "old-access"})
+            self.assertEqual(list(Path(directory).glob(".oauth_tokens-*.tmp")), [])
 
     def test_exchange_handles_google_error(self) -> None:
         error = HTTPError("https://oauth2.googleapis.com/token", 400, "bad request", {}, None)
@@ -48,17 +82,50 @@ class GoogleOAuthTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         exchange.assert_not_called()
 
+    def test_callback_handles_denial_and_missing_code_without_exchange(self) -> None:
+        with patch("app.api.google_oauth.exchange_code") as exchange:
+            denied = asyncio.run(callback(code=None, state="expected", error="access_denied", saved_state="expected"))
+            missing = asyncio.run(callback(code=None, state="expected", error=None, saved_state="expected"))
+        self.assertEqual(denied.status_code, 400)
+        self.assertIn(b"not approved", denied.body)
+        self.assertEqual(missing.status_code, 400)
+        self.assertIn(b"authorization code", missing.body)
+        exchange.assert_not_called()
+
+    def test_callback_handles_exchange_error_without_saving(self) -> None:
+        with patch("app.api.google_oauth.configuration", return_value=("id", "secret", "redirect")):
+            with patch("app.api.google_oauth.exchange_code", side_effect=OAuthExchangeError()):
+                with patch("app.api.google_oauth.save_tokens") as save:
+                    response = asyncio.run(callback(code="private-code", state="expected", error=None, saved_state="expected"))
+        self.assertEqual(response.status_code, 502)
+        save.assert_not_called()
+
+    def test_callback_handles_missing_configuration_and_storage_error(self) -> None:
+        with patch("app.api.google_oauth.configuration", side_effect=OAuthConfigError()):
+            unavailable = asyncio.run(callback(code="code", state="expected", error=None, saved_state="expected"))
+        with patch("app.api.google_oauth.configuration", return_value=("id", "secret", "redirect")):
+            with patch("app.api.google_oauth.exchange_code", return_value=OAuthTokens("private-access", None)):
+                with patch("app.api.google_oauth.save_tokens", side_effect=OAuthStorageError()):
+                    unsaved = asyncio.run(callback(code="code", state="expected", error=None, saved_state="expected"))
+        self.assertEqual(unavailable.status_code, 503)
+        self.assertEqual(unsaved.status_code, 500)
+        self.assertNotIn(b"private-access", unsaved.body)
+
     def test_callback_reports_success_without_tokens(self) -> None:
         with patch.dict(os.environ, {"GOOGLE_CLIENT_ID": "test-id", "GOOGLE_CLIENT_SECRET": "test-secret"}):
-            with patch("app.api.google_oauth.exchange_code", return_value=True):
-                with self.assertLogs("uvicorn.error", level="INFO") as recorded:
-                    response = asyncio.run(callback(code="private-code", state="expected", error=None, saved_state="expected"))
+            with patch("app.api.google_oauth.exchange_code", return_value=OAuthTokens("private-access", "private-refresh")):
+                with patch("app.api.google_oauth.save_tokens") as save:
+                    with self.assertLogs("uvicorn.error", level="INFO") as recorded:
+                        response = asyncio.run(callback(code="private-code", state="expected", error=None, saved_state="expected"))
         self.assertEqual(response.status_code, 200)
         self.assertNotIn(b"private-code", response.body)
-        self.assertIn(b"No account was saved yet", response.body)
+        self.assertNotIn(b"private-access", response.body)
+        self.assertIn(b"saved locally", response.body)
         self.assertIn("Max-Age=0", response.headers["set-cookie"])
         self.assertIn("access_token=True refresh_token=True", recorded.output[0])
         self.assertNotIn("private-code", recorded.output[0])
+        self.assertNotIn("private-access", recorded.output[0])
+        save.assert_called_once_with(OAuthTokens("private-access", "private-refresh"))
 
 
 if __name__ == "__main__":

@@ -8,9 +8,11 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from app.services.google_oauth import (
     OAuthConfigError,
     OAuthExchangeError,
+    OAuthStorageError,
     authorization_url,
     configuration,
     exchange_code,
+    save_tokens,
 )
 
 router = APIRouter(prefix="/auth/google")
@@ -69,15 +71,19 @@ async def callback(
     else:
         try:
             client_id, client_secret, redirect_uri = configuration()
-            has_refresh_token = await to_thread(exchange_code, code, client_id, client_secret, redirect_uri)
+            tokens = await to_thread(exchange_code, code, client_id, client_secret, redirect_uri)
+            await to_thread(save_tokens, tokens)
         except OAuthConfigError:
             response = result_page("Google connection is not configured.", 503)
         except OAuthExchangeError:
             logger.warning("Google OAuth token exchange failed")
             response = result_page("Google connection failed. Please try again.", 502)
+        except OAuthStorageError:
+            logger.warning("Google OAuth tokens could not be saved")
+            response = result_page("Google authorization could not be saved. Please try again.", 500)
         else:
-            logger.info("Google OAuth token exchange succeeded: access_token=True refresh_token=%s", has_refresh_token)
-            response = result_page("Google authorization verified. No account was saved yet.", 200)
+            logger.info("Google OAuth tokens saved: access_token=True refresh_token=%s", bool(tokens.refresh_token))
+            response = result_page("Google authorization saved locally. No account was added to the inbox yet.", 200)
 
     response.delete_cookie(STATE_COOKIE, path="/auth/google/callback", samesite="lax")
     return response
