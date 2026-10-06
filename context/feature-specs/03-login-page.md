@@ -11,6 +11,7 @@ Create a login page for the Multi Mail application.
 - Display the `Multi Mail` title.
 - Add a short description explaining that users can connect and manage multiple Gmail accounts in one place.
 - Add a primary `Continue with Google` button.
+- Add a visible Back button that returns to the mail page from which Connect Gmail was opened.
 - Keep the page centered, simple, and minimal.
 - Use existing `shadcn/ui` components where appropriate.
 - Use `lucide-react` icons where appropriate.
@@ -24,6 +25,7 @@ Create a login page for the Multi Mail application.
 - The `Multi Mail` title is visible.
 - The page includes a short description.
 - A visible `Continue with Google` button is present.
+- Back returns to the originating sample or connected mail page.
 - The button responds to user interaction without errors.
 - The page follows the existing Gmail-inspired UI style.
 - No backend or Gmail integration is changed.

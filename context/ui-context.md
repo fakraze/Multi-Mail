@@ -44,7 +44,9 @@ Use reusable React components styled to match Gmail. Avoid components with heavy
 - Left sidebar for inbox, starred, labels, and connected accounts.
 - Main area for compact email rows.
 - Email rows show sender, subject, preview, source account, and time.
+- Right-align source-account chips in a narrow column beside the timestamp, with both aligned across mail rows. The chip shows only the part of the account before `@`; its full address remains available as a tooltip. In the list, show only the local time for messages from today and only the local date for earlier messages.
 - Use subtle hover and selected states instead of heavy cards.
+- Keep the mail frame within the viewport. The toolbar, left navigation, and account area stay in place; only the message list or opened message content scrolls.
 
 ## Icons
 

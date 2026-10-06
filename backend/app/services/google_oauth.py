@@ -11,6 +11,7 @@ AUTHORIZATION_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.modify"
 DEFAULT_REDIRECT_URI = "http://127.0.0.1:8000/auth/google/callback"
+DEFAULT_FRONTEND_URL = "http://localhost:5173/"
 DOTENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 TOKEN_FILE = Path(__file__).resolve().parents[2] / "oauth_tokens.json"
 
@@ -46,7 +47,7 @@ def local_settings() -> dict[str, str]:
             continue
         key, value = line.split("=", 1)
         key, value = key.strip(), value.strip()
-        if key in {"GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI"}:
+        if key in {"GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI", "FRONTEND_URL"}:
             if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
                 value = value[1:-1]
             settings[key] = value
@@ -73,6 +74,23 @@ def configuration() -> tuple[str, str, str]:
     ):
         raise OAuthConfigError("Google OAuth redirect URI must use the local callback URL.")
     return client_id, client_secret, redirect_uri
+
+
+def frontend_url() -> str:
+    settings = local_settings()
+    value = os.getenv("FRONTEND_URL", settings.get("FRONTEND_URL", DEFAULT_FRONTEND_URL)).strip()
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname not in {"localhost", "127.0.0.1", "::1"}
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+    ):
+        raise OAuthConfigError("Frontend URL must be a local home page URL.")
+    return value.rstrip("/") + "/"
 
 
 def authorization_url(client_id: str, redirect_uri: str, state: str) -> str:

@@ -7,6 +7,7 @@
 }
 
 .login-panel {
+  position: relative;
   display: flex;
   width: min(100%, 420px);
   flex-direction: column;
@@ -16,6 +17,13 @@
   border-radius: var(--radius-xl);
   background: var(--bg-surface);
   text-align: center;
+}
+
+.login-back-button {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  color: var(--text-muted);
 }
 
 .login-icon {

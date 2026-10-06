@@ -117,10 +117,10 @@ class GoogleOAuthTests(unittest.TestCase):
                 with patch("app.api.google_oauth.save_tokens") as save:
                     with self.assertLogs("uvicorn.error", level="INFO") as recorded:
                         response = asyncio.run(callback(code="private-code", state="expected", error=None, saved_state="expected"))
-        self.assertEqual(response.status_code, 200)
-        self.assertNotIn(b"private-code", response.body)
-        self.assertNotIn(b"private-access", response.body)
-        self.assertIn(b"saved locally", response.body)
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "http://localhost:5173/?gmail=connected")
+        self.assertNotIn("private-code", response.headers["location"])
+        self.assertNotIn("private-access", response.headers["location"])
         self.assertIn("Max-Age=0", response.headers["set-cookie"])
         self.assertIn("access_token=True refresh_token=True", recorded.output[0])
         self.assertNotIn("private-code", recorded.output[0])

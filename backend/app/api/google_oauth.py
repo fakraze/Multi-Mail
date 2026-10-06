@@ -12,6 +12,7 @@ from app.services.google_oauth import (
     authorization_url,
     configuration,
     exchange_code,
+    frontend_url,
     save_tokens,
 )
 
@@ -61,7 +62,7 @@ async def callback(
     state: str | None = Query(default=None),
     error: str | None = Query(default=None),
     saved_state: str | None = Cookie(default=None, alias=STATE_COOKIE),
-) -> HTMLResponse:
+) -> Response:
     if not state or not saved_state or not secrets.compare_digest(state, saved_state):
         response = result_page("Google connection could not be verified.", 400)
     elif error:
@@ -72,6 +73,7 @@ async def callback(
         try:
             client_id, client_secret, redirect_uri = configuration()
             tokens = await to_thread(exchange_code, code, client_id, client_secret, redirect_uri)
+            home_url = frontend_url()
             await to_thread(save_tokens, tokens)
         except OAuthConfigError:
             response = result_page("Google connection is not configured.", 503)
@@ -83,7 +85,9 @@ async def callback(
             response = result_page("Google authorization could not be saved. Please try again.", 500)
         else:
             logger.info("Google OAuth tokens saved: access_token=True refresh_token=%s", bool(tokens.refresh_token))
-            response = result_page("Google authorization saved locally. No account was added to the inbox yet.", 200)
+            response = RedirectResponse(f"{home_url}?gmail=connected", status_code=303)
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["Referrer-Policy"] = "no-referrer"
 
     response.delete_cookie(STATE_COOKIE, path="/auth/google/callback", samesite="lax")
     return response
