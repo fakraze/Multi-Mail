@@ -196,7 +196,9 @@ def summary(data: dict[str, object], account: str) -> dict[str, object]:
     }
 
 
-def mailbox(requested_label: str | None = None) -> dict[str, object]:
+def mailbox(requested_label: str | None = None, search_query: str | None = None) -> dict[str, object]:
+    if search_query is not None and (not search_query.strip() or requested_label is not None):
+        raise GmailAccessError("Invalid mailbox search.")
     client = GmailClient()
     account = client.profile_address()
     label_response = client.get_json(LABELS_URL)
@@ -217,9 +219,13 @@ def mailbox(requested_label: str | None = None) -> dict[str, object]:
     labels.sort(key=lambda item: str(item["name"]).casefold())
     if requested_label is not None and requested_label != "STARRED" and requested_label not in {label["id"] for label in labels}:
         raise GmailAccessError("Invalid mailbox label.")
-    query = [("labelIds", "INBOX"), ("maxResults", "20")]
-    if requested_label is not None:
-        query.append(("labelIds", requested_label))
+    query = [("maxResults", "20")]
+    if search_query is not None:
+        query.append(("q", search_query))
+    else:
+        query.insert(0, ("labelIds", "INBOX"))
+        if requested_label is not None:
+            query.append(("labelIds", requested_label))
     url = GMAIL_URL + "?" + urlencode(query)
     listing = client.get_json(url)
     references = listing.get("messages", [])
@@ -248,7 +254,4 @@ def read_message(message_id: str) -> dict[str, object]:
     client = GmailClient()
     account = client.profile_address()
     data = client.get_json(f"{GMAIL_URL}/{quote(message_id)}?format=full")
-    labels = data.get("labelIds")
-    if not isinstance(labels, list) or "INBOX" not in labels:
-        raise GmailAccessError("This message is not in the inbox.")
     return {**summary(data, account), "body": body_text(data.get("payload")) or str(data.get("snippet", ""))}

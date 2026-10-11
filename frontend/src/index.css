@@ -7,6 +7,7 @@
   --border-default: #dadce0;
   --state-error: #b3261e;
   --state-success: #188038;
+  --search-highlight: #fff2a8;
   --font-sans: Arial, Roboto, system-ui, sans-serif;
   --font-mono: ui-monospace, Consolas, monospace;
 
@@ -30,6 +31,7 @@
   --border-default: #dadce0;
   --state-error: #b3261e;
   --state-success: #188038;
+  --search-highlight: #fff2a8;
   --font-sans: Arial, Roboto, system-ui, sans-serif;
   --font-mono: ui-monospace, Consolas, monospace;
 

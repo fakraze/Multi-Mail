@@ -39,8 +39,10 @@ async function request(path: string, signal?: AbortSignal, body?: object, method
   return data
 }
 
-export async function fetchMailbox(labelId?: string, signal?: AbortSignal): Promise<Mailbox> {
-  const path = labelId ? `/api/mailbox?label_id=${encodeURIComponent(labelId)}` : '/api/mailbox'
+export async function fetchMailbox(labelId?: string, signal?: AbortSignal, searchQuery?: string): Promise<Mailbox> {
+  const path = searchQuery !== undefined
+    ? `/api/mailbox?q=${encodeURIComponent(searchQuery)}`
+    : labelId ? `/api/mailbox?label_id=${encodeURIComponent(labelId)}` : '/api/mailbox'
   const data = await request(path, signal)
   if (!isRecord(data) || typeof data.account !== 'string' ||
     !Array.isArray(data.labels) || !data.labels.every((label: unknown) =>

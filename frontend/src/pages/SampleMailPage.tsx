@@ -69,7 +69,11 @@ function SampleMailPage({
     <main className="app-shell">
       <section className="mail-frame" aria-label="Main mail page">
         <aside className="mail-sidebar">
-          <h1>Multi Mail</h1>
+          <h1><button type="button" className="mail-home-button" onClick={() => {
+            setView('inbox')
+            setSelectedIds([])
+            setNotice(null)
+          }}>Multi Mail</button></h1>
           <Button className="connect-button" onClick={onConnect}>
             Connect Gmail
           </Button>

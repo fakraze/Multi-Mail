@@ -38,6 +38,26 @@
   line-height: 1.2;
 }
 
+.mail-home-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.mail-home-button:hover {
+  color: var(--accent-primary);
+}
+
+.mail-home-button:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 4px;
+  border-radius: var(--radius-md);
+}
+
 .connect-button {
   align-self: flex-start;
 }
@@ -253,6 +273,19 @@
   border-color: var(--accent-primary);
 }
 
+.search-wrap button {
+  display: flex;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.search-wrap button:disabled {
+  cursor: default;
+}
+
 .search-wrap input {
   border: 0;
   background: transparent;
@@ -329,6 +362,11 @@
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.search-highlight {
+  background: var(--search-highlight);
+  color: inherit;
 }
 
 .error-message {

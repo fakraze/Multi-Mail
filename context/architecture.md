@@ -88,6 +88,12 @@
 - `GET /api/mailbox` returns only user labels and Important in its `labels` array. A `label_id` filter accepts `STARRED`, `IMPORTANT`, or a returned user label ID. Category and Purchases filters are invalid. `PATCH /api/messages/{message_id}/labels` accepts star changes, Important, or user label IDs; it rejects category IDs. The backend-only modify command follows the same label rule.
 - The message label dialog lists Important and user labels only. When none of those are applied to a message, it says `No labels applied.` even if Gmail reports a category such as `CATEGORY_PERSONAL`. Its checkboxes still let the user add Important or a user label.
 
+### Single-account Gmail search (07-gmail-search)
+
+- `GET /api/mailbox?q=...` uses the latest local OAuth grant and passes the nonblank query as Gmail `users.messages.list` `q` without adding an INBOX filter. Search and `label_id` filtering are mutually exclusive. It returns up to 20 matching messages in the existing mailbox response shape, including the source account and sidebar labels. Search results remain in Gmail only.
+- The connected page submits one free-text search field to this endpoint. Search results replace the mail list; choosing a folder clears the active search, and Refresh reruns the active query. A blank submission returns to Inbox.
+- `GET /api/messages/{message_id}` may read a search result outside INBOX as plain text. Label modifications still require INBOX, so Gmail state cannot be changed through search for a message outside INBOX.
+
 ## Invariants
 
 1. Gmail remains the source of truth for email state

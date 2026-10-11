@@ -7,6 +7,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
+import SearchHighlight from '@/components/SearchHighlight'
+import { searchHighlightTerms } from '@/lib/searchHighlight'
 import { createGmailLabel, deleteGmailLabel, fetchMailbox, fetchMessage, setMessageLabel } from '@/services/mailbox'
 import type { Mailbox, MailLabel, MailMessage, MessageDetail } from '@/types/mail'
 
@@ -33,6 +35,8 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
   const [message, setMessage] = useState<MessageDetail | null>(null)
   const [folder, setFolder] = useState('INBOX')
   const folderRef = useRef(folder)
+  const [searchText, setSearchText] = useState('')
+  const [activeQuery, setActiveQuery] = useState<string | null>(null)
   const [labelTarget, setLabelTarget] = useState<MailMessage | null>(null)
   const [createLabelOpen, setCreateLabelOpen] = useState(false)
   const [newLabelName, setNewLabelName] = useState('')
@@ -51,6 +55,7 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
   const [error, setError] = useState<string | null>(null)
 
   const visibleMessages = mailbox && accountEnabled ? mailbox.messages : []
+  const highlightTerms = activeQuery ? searchHighlightTerms(activeQuery) : []
   const userLabels = mailbox?.labels.filter((label) => label.kind === 'user') ?? []
   const important = mailbox?.labels.find((label) => label.id === 'IMPORTANT')
   const editableLabels = mailbox?.labels.filter((label) => label.modifiable) ?? []
@@ -62,7 +67,7 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
     setLoading(true)
     setError(null)
     try {
-      setMailbox(await fetchMailbox(folder === 'INBOX' ? undefined : folder))
+      setMailbox(await fetchMailbox(activeQuery ? undefined : folder === 'INBOX' ? undefined : folder, undefined, activeQuery ?? undefined))
       setMessage(null)
       setSelectedIds([])
     } catch (cause) {
@@ -75,7 +80,7 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
 
   useEffect(() => {
     const controller = new AbortController()
-    fetchMailbox(folder === 'INBOX' ? undefined : folder, controller.signal)
+    fetchMailbox(activeQuery ? undefined : folder === 'INBOX' ? undefined : folder, controller.signal, activeQuery ?? undefined)
       .then((result) => {
         setMailbox(result)
         setLoading(false)
@@ -86,15 +91,33 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
         setLoading(false)
       })
     return () => controller.abort()
-  }, [folder])
+  }, [folder, activeQuery])
+
+  function submitSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const query = searchText.trim() ? searchText : null
+    setMessage(null)
+    setSelectedIds([])
+    setError(null)
+    setLoading(true)
+    if (query === activeQuery && (query !== null || folder === 'INBOX')) {
+      void reload()
+      return
+    }
+    if (query === null) setFolder('INBOX')
+    setActiveQuery(query)
+  }
 
   function selectFolder(nextFolder: string) {
-    if (nextFolder === folder) {
+    if (nextFolder === folder && activeQuery === null) {
       setMessage(null)
+      setSelectedIds([])
       return
     }
     folderRef.current = nextFolder
     setFolder(nextFolder)
+    setActiveQuery(null)
+    setSearchText('')
     setMessage(null)
     setSelectedIds([])
     setError(null)
@@ -114,7 +137,7 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
       setMailbox((current) => current && {
         ...current,
         messages: current.messages.map(update).filter((mail) =>
-          folder === 'INBOX' || mail.label_ids.includes(folder)),
+          activeQuery !== null || folder === 'INBOX' || mail.label_ids.includes(folder)),
       })
       setMessage((current) => current ? update(current) : null)
       setLabelTarget((current) => current ? update(current) : null)
@@ -188,7 +211,7 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
     <main className="app-shell">
       <section className="mail-frame" aria-label="Main mail page">
         <aside className="mail-sidebar">
-          <h1>Multi Mail</h1>
+          <h1><button type="button" className="mail-home-button" onClick={() => selectFolder('INBOX')}>Multi Mail</button></h1>
           <Button className="connect-button" onClick={onConnect}>Connect Gmail</Button>
           <nav className="mail-navigation" aria-label="Mail folders">
             <button type="button" className="navigation-item" aria-current={folder === 'INBOX' ? 'page' : undefined} onClick={() => selectFolder('INBOX')}>
@@ -295,28 +318,30 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
             <Button variant="ghost" size="icon" aria-label="Refresh mail" disabled={loading} onClick={() => void reload()}>
               <RefreshCw aria-hidden="true" size={20} />
             </Button>
-            <div className="search-wrap">
-              <Search aria-hidden="true" size={20} />
+            <form className="search-wrap" role="search" onSubmit={submitSearch}>
+              <button type="submit" aria-label="Search mail" disabled={!accountEnabled || loading}>
+                <Search aria-hidden="true" size={20} />
+              </button>
               <Input
-                aria-label="Search mail"
+                aria-label="Search Gmail"
                 placeholder="Search mail"
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') setNotice('Search mail')
-                }}
+                value={searchText}
+                onChange={(event) => setSearchText(event.target.value)}
+                disabled={!accountEnabled}
               />
-            </div>
+            </form>
           </div>
 
           <ScrollArea className="message-list">
             {loading && <p className="empty-message" role="status">Loading Gmail mail…</p>}
             {error && <p className="empty-message error-message" role="alert">{error}</p>}
-            {!loading && !mailbox && (
+            {!loading && !mailbox && !error && (
               <div className="empty-message"><p>Connect Gmail to see your inbox.</p><Button onClick={onConnect}>Connect Gmail</Button></div>
             )}
-            {!loading && mailbox && !message && visibleMessages.length === 0 && (
-              <p className="empty-message">{accountEnabled ? 'No messages in this view.' : 'Select the account to show its mail.'}</p>
+            {!loading && !error && mailbox && !message && visibleMessages.length === 0 && (
+              <p className="empty-message">{!accountEnabled ? 'Select the account to show its mail.' : activeQuery ? 'No messages match this search.' : 'No messages in this view.'}</p>
             )}
-            {!loading && !message && visibleMessages.map((item) => (
+            {!loading && !error && !message && visibleMessages.map((item) => (
               <div className="message-row live-message-row" key={item.id}>
                 <div className="message-actions">
                   <Checkbox
@@ -331,7 +356,7 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
                     size="icon"
                     className={item.starred ? 'marked-action' : undefined}
                     aria-label={`${item.starred ? 'Unstar' : 'Star'} ${item.subject}`}
-                    disabled={busyMessageId !== null}
+                    disabled={busyMessageId !== null || !item.label_ids.includes('INBOX')}
                     onClick={() => void changeLabel(item, 'STARRED', !item.starred)}
                   >
                     <Star aria-hidden="true" size={16} fill={item.starred ? 'currentColor' : 'none'} />
@@ -340,16 +365,18 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
                     variant="ghost"
                     size="icon"
                     aria-label={`Labels for ${item.subject}`}
-                    disabled={busyMessageId !== null}
+                    disabled={busyMessageId !== null || !item.label_ids.includes('INBOX')}
                     onClick={() => setLabelTarget(item)}
                   >
                     <Tag aria-hidden="true" size={16} />
                   </Button>
                 </div>
-                <button type="button" className="message-open sender" onClick={() => void openMessage(item.id)}>{item.sender}</button>
+                <button type="button" className="message-open sender" onClick={() => void openMessage(item.id)}>
+                  <SearchHighlight text={item.sender} terms={highlightTerms} />
+                </button>
                 <button type="button" className="message-open message-copy" onClick={() => void openMessage(item.id)}>
-                  <span className="subject">{item.subject}</span>
-                  <span className="snippet">{item.snippet}</span>
+                  <span className="subject"><SearchHighlight text={item.subject} terms={highlightTerms} /></span>
+                  <span className="snippet"><SearchHighlight text={item.snippet} terms={highlightTerms} /></span>
                 </button>
                 <span className="account-chip" title={item.account}>{item.account.split('@', 1)[0]}</span>
                 <time className="time" dateTime={item.received_at} title={formatTime(item.received_at)}>
@@ -362,12 +389,12 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
               <article className="message-detail">
                 <h2>{message.subject}</h2>
                 <div className="detail-actions">
-                  <Button variant="ghost" size="sm" disabled={busyMessageId !== null}
+                  <Button variant="ghost" size="sm" disabled={busyMessageId !== null || !message.label_ids.includes('INBOX')}
                     onClick={() => void changeLabel(message, 'STARRED', !message.starred)}>
                     <Star aria-hidden="true" size={16} fill={message.starred ? 'currentColor' : 'none'} />
                     {message.starred ? 'Unstar' : 'Star'}
                   </Button>
-                  <Button variant="ghost" size="sm" disabled={busyMessageId !== null}
+                  <Button variant="ghost" size="sm" disabled={busyMessageId !== null || !message.label_ids.includes('INBOX')}
                     onClick={() => setLabelTarget(message)}>
                     <Tag aria-hidden="true" size={16} /> Labels
                   </Button>

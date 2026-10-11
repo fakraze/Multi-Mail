@@ -43,7 +43,7 @@ class GmailInboxTests(unittest.TestCase):
         self.assertTrue(result["messages"][0]["starred"])
         self.assertIn("labelIds=INBOX", client.get_json.call_args_list[1].args[0])
 
-    def test_read_message_returns_plain_text_and_rejects_non_inbox(self) -> None:
+    def test_read_message_returns_plain_text_for_search_hit_outside_inbox(self) -> None:
         encoded = base64.urlsafe_b64encode(b"Hello from Gmail").decode("ascii")
         data = {
             "id": "abc", "internalDate": "1000", "labelIds": ["INBOX"], "snippet": "Hello",
@@ -55,8 +55,7 @@ class GmailInboxTests(unittest.TestCase):
             result = read_message("abc")
             self.assertEqual(result["body"], "Hello from Gmail")
             data["labelIds"] = ["SENT"]
-            with self.assertRaisesRegex(GmailAccessError, "not in the inbox"):
-                read_message("abc")
+            self.assertEqual(read_message("abc")["body"], "Hello from Gmail")
         self.assertEqual(body_text({"mimeType": "text/html", "body": {"data": base64.urlsafe_b64encode(b"<p>Hi<script>bad()</script> there</p>").decode("ascii")}}), "Hi there")
 
     def test_mailbox_filters_inbox_by_gmail_label(self) -> None:
@@ -77,6 +76,23 @@ class GmailInboxTests(unittest.TestCase):
                 mailbox("CATEGORY_PERSONAL")
             with self.assertRaisesRegex(GmailAccessError, "Invalid mailbox label"):
                 mailbox("UNREAD")
+
+    def test_search_passes_gmail_syntax_without_inbox_filter(self) -> None:
+        with patch("app.services.gmail_inbox.GmailClient") as client_class:
+            client = client_class.return_value
+            client.profile_address.return_value = "me@example.com"
+            client.get_json.side_effect = lambda url: (
+                {"labels": []} if url.endswith("/labels") else {"messages": []}
+            )
+            result = mailbox(search_query='from:alice@example.com subject:"Quarterly Report"')
+        self.assertEqual(result["messages"], [])
+        url = client.get_json.call_args.args[0]
+        self.assertIn("q=from%3Aalice%40example.com+subject%3A%22Quarterly+Report%22", url)
+        self.assertNotIn("labelIds=INBOX", url)
+        with self.assertRaisesRegex(GmailAccessError, "Invalid mailbox search"):
+            mailbox(search_query=" ")
+        with self.assertRaisesRegex(GmailAccessError, "Invalid mailbox search"):
+            mailbox("STARRED", "hello")
 
     def test_sender_uses_display_name_without_quotes_or_address(self) -> None:
         self.assertEqual(

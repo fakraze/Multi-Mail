@@ -11,9 +11,17 @@ class MailboxApiTests(unittest.TestCase):
         with patch("app.api.mailbox.mailbox", return_value={
             "account": "me@example.com", "labels": [], "messages": [],
         }) as service:
-            result = asyncio.run(get_mailbox("STARRED"))
+            result = asyncio.run(get_mailbox("STARRED", None))
         self.assertEqual(result.messages, [])
-        service.assert_called_once_with("STARRED")
+        service.assert_called_once_with("STARRED", None)
+
+    def test_search_query_is_passed_to_gmail_service(self) -> None:
+        with patch("app.api.mailbox.mailbox", return_value={
+            "account": "me@example.com", "labels": [], "messages": [],
+        }) as service:
+            result = asyncio.run(get_mailbox(None, "from:alice@example.com"))
+        self.assertEqual(result.messages, [])
+        service.assert_called_once_with(None, "from:alice@example.com")
 
     def test_star_route_returns_confirmed_labels_and_account_scope(self) -> None:
         with patch("app.api.mailbox.modify_message", return_value={"INBOX", "STARRED"}) as service:
