@@ -92,7 +92,7 @@ class GoogleOAuthTests(unittest.TestCase):
             with patch("app.api.google_oauth.exchange_code", return_value=OAuthTokens("private-access", "private-refresh")):
                 with patch("app.api.google_oauth.profile_for_tokens", return_value=GmailProfile("me@example.com")):
                     with patch("app.api.google_oauth.store_account") as save:
-                        with patch("app.api.google_oauth.TOKEN_FILE"):
+                        with patch("app.api.google_oauth.sync_mailbox") as sync, patch("app.api.google_oauth.TOKEN_FILE"):
                             with self.assertLogs("uvicorn.error", level="INFO") as recorded:
                                 response = asyncio.run(callback(code="private-code", state="expected", error=None, saved_state="expected"))
         self.assertEqual(response.status_code, 303)
@@ -104,6 +104,7 @@ class GoogleOAuthTests(unittest.TestCase):
         self.assertNotIn("private-code", recorded.output[0])
         self.assertNotIn("private-access", recorded.output[0])
         save.assert_called_once_with("me@example.com", OAuthTokens("private-access", "private-refresh"))
+        sync.assert_called_once_with()
 
 
 if __name__ == "__main__":

@@ -4,11 +4,11 @@ Update this file after every meaningful implementation change.
 
 ## Current Phase
 
-- 09 Database persistence complete
+- 10 Background Mail Sync in progress
 
 ## Current Goal
 
-- Choose the next feature unit from Next Up; automatic mail synchronization remains a later phase.
+- Implement first-connection full sync, history-based incremental sync, and quiet one-minute refresh while preserving visible mail.
 
 ## Completed
 
@@ -38,17 +38,12 @@ Update this file after every meaningful implementation change.
 
 ## In Progress
 
-- None.
+- **10-background-sync:** In progress. Sync remains bounded to requested mailbox pages rather than copying the full Gmail mailbox.
+  Added a SQLite history cursor and migration, a sync endpoint that checks paginated Gmail history and rebuilds a page after changes or when incremental sync cannot continue, and first-connection Inbox sync. The connected page keeps mail rendered during manual and minute-timer synchronization, shows `Loading` only for manual refresh, and rereads cached mail after success. The timer resets after manual refresh. The API and storage docs were updated. All 46 backend tests, frontend lint, and production build pass. Live Gmail verification is still pending.
+  Fixed connected folder, search, pagination, and cached-page reload transitions so the previously displayed rows remain mounted while the next view loads. Loading appears in the toolbar; the old rows are replaced only after the request succeeds and remain visible on failure. Frontend lint and production build pass after this fix.
 
 ## Next Up
 
-- background process, update speed (save mail in DB but sync every user refresh and every miniute)
-    First connection
-        → Full sync
-    Later syncs(user refresh and every 1 minute)
-        → Incremental sync
-    If incremental sync fails
-        → Full sync fallback
 - DB for multiple account
 - connect multiple accounts
 - disconnect account
@@ -69,5 +64,5 @@ Update this file after every meaningful implementation change.
 
 ## Session Notes
 
-- The root README documents the current version's local setup, frontend/backend data flow, HTTP API, SQLite tables, cache behavior, and verification commands. The backend README's token storage description was updated.
+- The root README documents the current version's local setup, frontend/backend data flow, HTTP API, SQLite tables, cache and sync behavior, and verification commands. The backend README describes first sync and history-based refresh.
 - The React app starts on the original sample mail page. Connect Gmail opens the login page, whose Back button returns to the originating sample or live mail view; Continue with Google navigates to the local FastAPI OAuth start route. On authorization success, the callback redirects home with `gmail=connected` and the frontend loads the latest grant's real Gmail inbox. Direct visits to `/` stay on the sample page even when a database grant exists. The connected page filters INBOX mail by Starred or sidebar labels, supports star and displayed label changes in rows and opened messages, can create or delete Gmail user labels, searches the latest connected account, and paginates up to 50 messages at a time. Requested pages are cached in SQLite and remain unchanged until invalidated by a Gmail action or later synchronization work. While mail reloads, the sidebar retains Important, user labels, and account controls. The Multi Mail title returns the current mail view to Inbox. Multi-account storage and disconnect are not yet connected. Direct Uvicorn runs use `--no-access-log` so callback authorization codes are not written to request logs.

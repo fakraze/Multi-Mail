@@ -2,11 +2,16 @@ import asyncio
 import unittest
 from unittest.mock import patch
 
-from app.api.mailbox import add_label, change_message_label, get_mailbox, remove_label
+from app.api.mailbox import add_label, change_message_label, get_mailbox, remove_label, sync_mailbox_route
 from app.schemas.mailbox import CreateLabel, LabelChange
 
 
 class MailboxApiTests(unittest.TestCase):
+    def test_sync_route_passes_active_view(self) -> None:
+        with patch("app.api.mailbox.sync_mailbox") as service:
+            asyncio.run(sync_mailbox_route("STARRED", None, "next-token"))
+        service.assert_called_once_with("STARRED", None, "next-token")
+
     def test_filter_is_passed_to_gmail_service(self) -> None:
         with patch("app.api.mailbox.mailbox", return_value={
             "account": "me@example.com", "labels": [], "messages": [],

@@ -16,6 +16,7 @@ from app.services.google_oauth import (
 )
 from app.services.gmail_access import GmailAccessError, profile_for_tokens
 from app.services.persistence import store_account
+from app.services.mail_sync import sync_mailbox
 from app.services.google_oauth import TOKEN_FILE
 
 router = APIRouter(prefix="/auth/google")
@@ -78,6 +79,7 @@ async def callback(
             home_url = frontend_url()
             profile = await to_thread(profile_for_tokens, tokens)
             await to_thread(store_account, profile.email_address, tokens)
+            await to_thread(sync_mailbox)
             try:
                 TOKEN_FILE.unlink(missing_ok=True)
             except OSError:

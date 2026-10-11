@@ -39,6 +39,14 @@ async function request(path: string, signal?: AbortSignal, body?: object, method
   return data
 }
 
+export async function syncMailbox(labelId?: string, searchQuery?: string, pageToken?: string): Promise<void> {
+  const params = new URLSearchParams()
+  if (searchQuery !== undefined) params.set('q', searchQuery)
+  else if (labelId) params.set('label_id', labelId)
+  if (pageToken !== undefined) params.set('page_token', pageToken)
+  await request(`/api/mailbox/sync${params.size ? `?${params.toString()}` : ''}`, undefined, undefined, 'POST')
+}
+
 export async function fetchMailbox(labelId?: string, signal?: AbortSignal, searchQuery?: string, pageToken?: string): Promise<Mailbox> {
   const params = new URLSearchParams()
   if (searchQuery !== undefined) params.set('q', searchQuery)

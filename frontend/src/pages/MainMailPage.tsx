@@ -9,7 +9,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import SearchHighlight from '@/components/SearchHighlight'
 import { searchHighlightTerms } from '@/lib/searchHighlight'
-import { createGmailLabel, deleteGmailLabel, fetchMailbox, fetchMessage, setMessageLabel } from '@/services/mailbox'
+import { createGmailLabel, deleteGmailLabel, fetchMailbox, fetchMessage, setMessageLabel, syncMailbox } from '@/services/mailbox'
 import type { Mailbox, MailLabel, MailMessage, MessageDetail } from '@/types/mail'
 
 import '../App.css'
@@ -37,6 +37,7 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
   const folderRef = useRef(folder)
   const [searchText, setSearchText] = useState('')
   const [activeQuery, setActiveQuery] = useState<string | null>(null)
+  const [displayedQuery, setDisplayedQuery] = useState<string | null>(null)
   const [labelTarget, setLabelTarget] = useState<MailMessage | null>(null)
   const [createLabelOpen, setCreateLabelOpen] = useState(false)
   const [newLabelName, setNewLabelName] = useState('')
@@ -57,15 +58,22 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
   const [loadedPage, setLoadedPage] = useState(1)
   const [pageTokens, setPageTokens] = useState<(string | null)[]>([null])
   const [loadRevision, setLoadRevision] = useState(0)
+  const [syncing, setSyncing] = useState(false)
+  const [syncCycle, setSyncCycle] = useState(0)
+  const syncTask = useRef<Promise<void> | null>(null)
+  const requestedPageToken = pageTokens[page - 1] ?? undefined
+  const viewKey = `${folder}:${activeQuery ?? ''}:${page}:${requestedPageToken ?? ''}`
+  const viewKeyRef = useRef(viewKey)
+
+  useEffect(() => { viewKeyRef.current = viewKey }, [viewKey])
 
   const visibleMessages = mailbox && accountEnabled ? mailbox.messages : []
-  const highlightTerms = activeQuery ? searchHighlightTerms(activeQuery) : []
+  const highlightTerms = displayedQuery ? searchHighlightTerms(displayedQuery) : []
   const userLabels = mailbox?.labels.filter((label) => label.kind === 'user') ?? []
   const editableLabels = mailbox?.labels.filter((label) => label.modifiable) ?? []
   const appliedLabels = editableLabels.filter((label) => labelTarget?.label_ids.includes(label.id))
   const allSelected = visibleMessages.length > 0 && visibleMessages.every((item) => selectedIds.includes(item.id))
   const someSelected = visibleMessages.some((item) => selectedIds.includes(item.id))
-  const requestedPageToken = pageTokens[page - 1] ?? undefined
 
   function reload() {
     setLoading(true)
@@ -77,6 +85,49 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
     setLoadRevision((current) => current + 1)
   }
 
+  async function refreshMail(manual: boolean) {
+    if (!mailbox) return
+    if (manual) {
+      setSyncCycle((current) => current + 1)
+      setSyncing(true)
+    }
+    if (syncTask.current) {
+      try { await syncTask.current } finally { if (manual) setSyncing(false) }
+      return
+    }
+    const originalView = viewKey
+    const task = (async () => {
+      try {
+        await syncMailbox(activeQuery ? undefined : folder === 'INBOX' ? undefined : folder,
+          activeQuery ?? undefined, requestedPageToken)
+        if (viewKeyRef.current === originalView) {
+          const result = await fetchMailbox(activeQuery ? undefined : folder === 'INBOX' ? undefined : folder,
+            undefined, activeQuery ?? undefined, requestedPageToken)
+          if (viewKeyRef.current === originalView) {
+            setMailbox(result)
+            setError(null)
+          }
+        }
+      } catch (cause) {
+        if (viewKeyRef.current === originalView) {
+          setError(cause instanceof Error ? cause.message : 'Could not synchronize Gmail.')
+        }
+      }
+    })()
+    syncTask.current = task
+    try { await task } finally {
+      syncTask.current = null
+      if (manual) setSyncing(false)
+    }
+  }
+
+  useEffect(() => {
+    const timer = window.setInterval(() => { void refreshMail(false) }, 60_000)
+    return () => window.clearInterval(timer)
+  // The timer resets on manual refresh and when the active mailbox view changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncCycle, viewKey, mailbox?.account])
+
   useEffect(() => {
     const controller = new AbortController()
     fetchMailbox(activeQuery ? undefined : folder === 'INBOX' ? undefined : folder,
@@ -84,6 +135,7 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
       .then((result) => {
         if (controller.signal.aborted) return
         setMailbox(result)
+        setDisplayedQuery(activeQuery)
         setLoadedPage(page)
         setError(null)
         setLoading(false)
@@ -334,9 +386,10 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
                 aria-label="Select all visible emails"
               />
             )}
-            <Button variant="ghost" size="icon" aria-label="Refresh mail" disabled={loading} onClick={() => void reload()}>
+            <Button variant="ghost" size="icon" aria-label="Refresh mail" disabled={loading || syncing} onClick={() => void refreshMail(true)}>
               <RefreshCw aria-hidden="true" size={20} />
             </Button>
+            {(syncing || loading && mailbox) && <span className="sync-status" role="status">Loading</span>}
             <form className="search-wrap" role="search" onSubmit={submitSearch}>
               <button type="submit" aria-label="Search mail" disabled={!accountEnabled || loading}>
                 <Search aria-hidden="true" size={20} />
@@ -351,20 +404,22 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
             </form>
           </div>
 
-          <ScrollArea className="message-list" key={`${folder}:${activeQuery ?? ''}:${page}:${loadRevision}`}>
-            {loading && <p className="empty-message" role="status">Loading Gmail mail…</p>}
+
+          <ScrollArea className="message-list">
+            {loading && !mailbox && <p className="empty-message" role="status">Loading Gmail mail…</p>}
             {error && <p className="empty-message error-message" role="alert">{error}</p>}
             {!loading && !mailbox && !error && (
               <div className="empty-message"><p>Connect Gmail to see your inbox.</p><Button onClick={onConnect}>Connect Gmail</Button></div>
             )}
-            {!loading && !error && mailbox && !message && visibleMessages.length === 0 && (
+            {mailbox && !message && visibleMessages.length === 0 && (
               <p className="empty-message">{!accountEnabled ? 'Select the account to show its mail.' : activeQuery ? 'No messages match this search.' : 'No messages in this view.'}</p>
             )}
-            {!loading && !error && !message && visibleMessages.map((item) => (
+            {!message && visibleMessages.map((item) => (
               <div className="message-row live-message-row" key={item.id}>
                 <div className="message-actions">
                   <Checkbox
                     checked={selectedIds.includes(item.id)}
+                    disabled={loading}
                     onCheckedChange={(checked) => setSelectedIds((current) => checked === true
                       ? [...new Set([...current, item.id])]
                       : current.filter((id) => id !== item.id))}
@@ -375,7 +430,7 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
                     size="icon"
                     className={item.starred ? 'marked-action' : undefined}
                     aria-label={`${item.starred ? 'Unstar' : 'Star'} ${item.subject}`}
-                    disabled={busyMessageId !== null || !item.label_ids.includes('INBOX')}
+                    disabled={loading || busyMessageId !== null || !item.label_ids.includes('INBOX')}
                     onClick={() => void changeLabel(item, 'STARRED', !item.starred)}
                   >
                     <Star aria-hidden="true" size={16} fill={item.starred ? 'currentColor' : 'none'} />
@@ -384,16 +439,16 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
                     variant="ghost"
                     size="icon"
                     aria-label={`Labels for ${item.subject}`}
-                    disabled={busyMessageId !== null || !item.label_ids.includes('INBOX')}
+                    disabled={loading || busyMessageId !== null || !item.label_ids.includes('INBOX')}
                     onClick={() => setLabelTarget(item)}
                   >
                     <Tag aria-hidden="true" size={16} />
                   </Button>
                 </div>
-                <button type="button" className="message-open sender" onClick={() => void openMessage(item.id)}>
+                <button type="button" className="message-open sender" disabled={loading} onClick={() => void openMessage(item.id)}>
                   <SearchHighlight text={item.sender} terms={highlightTerms} />
                 </button>
-                <button type="button" className="message-open message-copy" onClick={() => void openMessage(item.id)}>
+                <button type="button" className="message-open message-copy" disabled={loading} onClick={() => void openMessage(item.id)}>
                   <span className="subject"><SearchHighlight text={item.subject} terms={highlightTerms} /></span>
                   <span className="snippet"><SearchHighlight text={item.snippet} terms={highlightTerms} /></span>
                 </button>

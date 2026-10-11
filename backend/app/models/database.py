@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, create_engine, event
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, create_engine, event, inspect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 DATABASE_FILE = Path(__file__).resolve().parents[2] / "mail.db"
@@ -20,6 +20,7 @@ class Account(Base):
     email_address: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     access_token: Mapped[str] = mapped_column(Text, nullable=False)
     refresh_token: Mapped[str | None] = mapped_column(Text)
+    history_id: Mapped[str | None] = mapped_column(String)
     messages: Mapped[list["CachedMessage"]] = relationship(cascade="all, delete-orphan")
     pages: Mapped[list["CachedPage"]] = relationship(cascade="all, delete-orphan")
 
@@ -68,3 +69,8 @@ def initialize_database() -> None:
     except OSError:
         pass
     Base.metadata.create_all(engine)
+    if "accounts" in inspect(engine).get_table_names() and "history_id" not in {
+        column["name"] for column in inspect(engine).get_columns("accounts")
+    }:
+        with engine.begin() as connection:
+            connection.exec_driver_sql("ALTER TABLE accounts ADD COLUMN history_id VARCHAR")

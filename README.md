@@ -67,6 +67,7 @@ Multi Mail 是在本機執行的 Gmail 郵件介面。前端使用 React、TypeS
 | `GET /auth/google/start` | 無 | 重新導向 Google；設定短效、HTTP-only、SameSite=Lax 的 state cookie |
 | `GET /auth/google/callback` | Google 提供的 `code`、`state`，或 `error` | 成功時 `303` 導回前端 `?gmail=connected`；失敗時回傳不含 token 的 HTML 錯誤頁 |
 | `GET /api/mailbox` | 可選 `label_id`、`q`、`page_token` | `200 Mailbox` |
+| `POST /api/mailbox/sync` | 可選 `label_id`、`q`、`page_token` | `204`，同步目前頁面與 Gmail history cursor |
 | `GET /api/messages/{message_id}` | Gmail message ID | `200 MessageDetail` |
 | `PATCH /api/messages/{message_id}/labels` | JSON `LabelChange`；星號也透過此路由設定 `STARRED` | `200 MessageLabels` |
 | `POST /api/labels` | JSON `CreateLabel` | `200 MailLabel` |
@@ -155,13 +156,15 @@ Multi Mail 是在本機執行的 Gmail 郵件介面。前端使用 React、TypeS
 
 | 資料表 | 欄位 | 用途 |
 | --- | --- | --- |
-| `accounts` | `id` (PK)、`email_address` (unique)、`access_token`、`refresh_token` (nullable) | 儲存目前連線的一個 Gmail 帳號及 OAuth 憑證 |
+| `accounts` | `id` (PK)、`email_address` (unique)、`access_token`、`refresh_token` (nullable)、`history_id` (nullable) | 儲存目前連線的一個 Gmail 帳號、OAuth 憑證與同步游標 |
 | `cached_messages` | `account_id` + `gmail_id` (複合 PK)、`thread_id`、`sender`、`subject`、`snippet`、`received_at`、`starred`、`label_ids_json` | 儲存郵件列表需要的摘要；`account_id` 是指向 `accounts.id` 的外鍵 |
 | `cached_pages` | `account_id` + `cache_key` (複合 PK)、`message_ids_json`、`labels_json`、`next_page_token` (nullable) | 儲存某次列表請求的郵件順序、側欄標籤與下一頁 token；`account_id` 是指向 `accounts.id` 的外鍵 |
 
 `cache_key` 是 `[label_id, q, page_token]` 的 JSON 字串，區分 Inbox、標籤、搜尋和分頁。讀取列表時，後端先查找對應頁面；命中時直接組合 `cached_pages` 與 `cached_messages` 回應，未命中時才向 Gmail 取資料並寫入 SQLite。空頁面也會快取。
 
 星號或標籤操作經 Gmail 確認成功後，後端會清除 `cached_pages`，讓後續列表請求重新讀取 Gmail。重新授權會替換目前帳號並清除郵件與頁面快取；同一帳號重新授權而 Google 未回傳 refresh token 時，保留原有的 refresh token。舊版 `backend/oauth_tokens.json` 若存在，首次讀取授權時會驗證帳號、遷移到 SQLite，然後移除舊檔。郵件本文不寫入資料庫。
+
+首次連線會同步 Inbox 第一頁並儲存 Gmail `historyId`。之後手動重新整理及每分鐘的自動同步會讀取 Gmail history；若有變更，重新取得目前頁面並與游標一起提交至 SQLite。若增量同步無法繼續，就重新同步目前頁面。同步期間保留目前顯示的郵件；手動重新整理會顯示 `Loading`，自動同步則不顯示。同步失敗時保留舊快取及畫面，並顯示錯誤。
 
 `mail.db` 包含明文 OAuth 憑證與郵件摘要，請只保留在自己的本機環境，不要提交、分享或記錄其內容。
 

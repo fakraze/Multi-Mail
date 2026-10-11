@@ -9,6 +9,7 @@ from app.services.cached_mailbox import mailbox
 from app.services.gmail_inbox import read_message
 from app.services.gmail_modify import create_label, delete_label, modify_message
 from app.services.persistence import invalidate_mailbox_cache
+from app.services.mail_sync import sync_mailbox
 
 router = APIRouter(prefix="/api")
 
@@ -34,6 +35,15 @@ async def get_mailbox(label_id: str | None = Query(default=None), q: str | None 
                       page_token: str | None = Query(default=None)) -> Mailbox:
     try:
         return Mailbox.model_validate(await to_thread(mailbox, label_id, q, page_token))
+    except GmailAccessError as exc:
+        raise api_error(exc) from exc
+
+
+@router.post("/mailbox/sync", status_code=204)
+async def sync_mailbox_route(label_id: str | None = Query(default=None), q: str | None = Query(default=None),
+                             page_token: str | None = Query(default=None)) -> None:
+    try:
+        await to_thread(sync_mailbox, label_id, q, page_token)
     except GmailAccessError as exc:
         raise api_error(exc) from exc
 

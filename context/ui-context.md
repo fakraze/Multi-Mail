@@ -49,7 +49,7 @@ Use reusable React components styled to match Gmail. Avoid components with heavy
 - Right-align source-account chips in a narrow column beside the timestamp, with both aligned across mail rows. The chip shows only the part of the account before `@`; its full address remains available as a tooltip. In the list, show only the local time for messages from today and only the local date for earlier messages.
 - Use subtle hover and selected states instead of heavy cards.
 - Keep the mail frame within the viewport. The toolbar, left navigation, and account area stay in place; only the message list or opened message content scrolls.
-- While reloading connected mail, show loading feedback in the message list and keep the previously loaded sidebar labels and account controls visible.
+- While loading a different connected folder, search, or page, keep the previously displayed mail rows, sidebar labels, and account controls visible. Show loading feedback in the toolbar and replace the rows only when the next view succeeds; keep the old rows if it fails. The initial load may show loading feedback in the message list.
 - On the connected search result list, highlight matching visible query terms in sender, subject, and preview with the search highlight color. Quoted phrases remain whole; Gmail filter operators such as `after:` and `in:` are not highlight terms. Highlighting is visual only and does not alter the Gmail query.
 
 ## Icons

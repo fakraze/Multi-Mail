@@ -161,6 +161,8 @@ class GmailClient:
                     raise GmailAccessError("Google access has expired. Connect Gmail again.") from exc
                 if exc.code == 403:
                     raise GmailAccessError("Gmail access was denied. Check Gmail API access.") from exc
+                if exc.code == 404:
+                    raise GmailNotFoundError("Gmail resource was not found.") from exc
                 raise GmailAccessError(f"Gmail API request failed (HTTP {exc.code}).") from exc
             except (URLError, TimeoutError, OSError, ValueError) as exc:
                 raise GmailAccessError("Could not contact Gmail.") from exc
@@ -177,6 +179,10 @@ class GmailClient:
 
     def delete_json(self, url: str) -> dict[str, object]:
         return self.request_json(url, method="DELETE")
+
+
+class GmailNotFoundError(GmailAccessError):
+    pass
 
 
 def summary(data: dict[str, object], account: str) -> dict[str, object]:
