@@ -30,6 +30,13 @@ DISPLAY_SYSTEM_LABELS = {
 MESSAGE_ID = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
+def with_important_label(labels: list[dict[str, object]]) -> list[dict[str, object]]:
+    if not any(label.get("id") == "IMPORTANT" for label in labels):
+        labels = [*labels, {"id": "IMPORTANT", "name": "Important", "kind": "system",
+                            "modifiable": True, "deletable": False}]
+    return sorted(labels, key=lambda item: str(item["name"]).casefold())
+
+
 class PlainText(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -174,8 +181,9 @@ class GmailClient:
 
 def summary(data: dict[str, object], account: str) -> dict[str, object]:
     message_id = data.get("id")
+    thread_id = data.get("threadId")
     timestamp = data.get("internalDate")
-    if not isinstance(message_id, str) or not isinstance(timestamp, str) or not timestamp.isdecimal():
+    if not isinstance(message_id, str) or not isinstance(thread_id, str) or not thread_id or not isinstance(timestamp, str) or not timestamp.isdecimal():
         raise GmailAccessError("Gmail returned an invalid message.")
     try:
         received_at = datetime.fromtimestamp(int(timestamp) / 1000, timezone.utc).isoformat()
@@ -186,6 +194,7 @@ def summary(data: dict[str, object], account: str) -> dict[str, object]:
     snippet = data.get("snippet")
     return {
         "id": message_id,
+        "thread_id": thread_id,
         "account": account,
         "sender": sender_name(data.get("payload")),
         "subject": header_value(data.get("payload"), "Subject") or "(no subject)",
@@ -219,7 +228,7 @@ def mailbox(requested_label: str | None = None, search_query: str | None = None,
             labels.append({"id": label_id, "name": name, "kind": "user", "modifiable": True, "deletable": True})
         elif label_id in DISPLAY_SYSTEM_LABELS:
             labels.append({"id": label_id, "name": DISPLAY_SYSTEM_LABELS[label_id], "kind": "system", "modifiable": True, "deletable": False})
-    labels.sort(key=lambda item: str(item["name"]).casefold())
+    labels = with_important_label(labels)
     if requested_label is not None and requested_label != "STARRED" and requested_label not in {label["id"] for label in labels}:
         raise GmailAccessError("Invalid mailbox label.")
     query = [("maxResults", "50")]

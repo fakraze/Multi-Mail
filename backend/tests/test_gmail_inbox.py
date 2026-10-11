@@ -13,11 +13,11 @@ class GmailInboxTests(unittest.TestCase):
     def test_mailbox_returns_real_account_and_newest_inbox_summaries(self) -> None:
         listing = {"messages": [{"id": "abc"}, {"id": "def"}]}
         first = {
-            "id": "abc", "internalDate": "1000", "snippet": "first preview", "labelIds": ["INBOX"],
+            "id": "abc", "threadId": "thread-abc", "internalDate": "1000", "snippet": "first preview", "labelIds": ["INBOX"],
             "payload": {"headers": [{"name": "From", "value": "Alice <alice@example.com>"}, {"name": "Subject", "value": "First"}]},
         }
         second = {
-            "id": "def", "internalDate": "2000", "snippet": "second preview", "labelIds": ["INBOX", "STARRED"],
+            "id": "def", "threadId": "thread-def", "internalDate": "2000", "snippet": "second preview", "labelIds": ["INBOX", "STARRED"],
             "payload": {"headers": [{"name": "From", "value": "Bob"}, {"name": "Subject", "value": "Second"}]},
         }
         with patch("app.services.gmail_inbox.GmailClient") as client_class:
@@ -47,7 +47,7 @@ class GmailInboxTests(unittest.TestCase):
     def test_read_message_returns_plain_text_for_search_hit_outside_inbox(self) -> None:
         encoded = base64.urlsafe_b64encode(b"Hello from Gmail").decode("ascii")
         data = {
-            "id": "abc", "internalDate": "1000", "labelIds": ["INBOX"], "snippet": "Hello",
+            "id": "abc", "threadId": "thread-abc", "internalDate": "1000", "labelIds": ["INBOX"], "snippet": "Hello",
             "payload": {"mimeType": "text/plain", "body": {"data": encoded}, "headers": [{"name": "Subject", "value": "A message"}]},
         }
         with patch("app.services.gmail_inbox.GmailClient") as client_class:
@@ -71,6 +71,7 @@ class GmailInboxTests(unittest.TestCase):
             self.assertIn("labelIds=INBOX&maxResults=50&labelIds=STARRED", client.get_json.call_args.args[0])
             self.assertEqual(mailbox("Label_1")["messages"], [])
             self.assertIn("labelIds=Label_1", client.get_json.call_args.args[0])
+            self.assertEqual(mailbox("IMPORTANT")["labels"][0]["id"], "IMPORTANT")
             with self.assertRaisesRegex(GmailAccessError, "Invalid mailbox label"):
                 mailbox("PURCHASES")
             with self.assertRaisesRegex(GmailAccessError, "Invalid mailbox label"):

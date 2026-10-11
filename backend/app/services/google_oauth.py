@@ -1,6 +1,5 @@
 import json
 import os
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -136,32 +135,3 @@ def exchange_code(code: str, client_id: str, client_secret: str, redirect_uri: s
         access_token=tokens["access_token"],
         refresh_token=refresh_token if isinstance(refresh_token, str) and refresh_token else None,
     )
-
-
-def save_tokens(tokens: OAuthTokens) -> None:
-    temporary_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=TOKEN_FILE.parent,
-            prefix=".oauth_tokens-",
-            suffix=".tmp",
-            delete=False,
-        ) as temporary_file:
-            temporary_path = Path(temporary_file.name)
-            os.chmod(temporary_path, 0o600)
-            json.dump(
-                {"access_token": tokens.access_token, "refresh_token": tokens.refresh_token},
-                temporary_file,
-            )
-            temporary_file.flush()
-            os.fsync(temporary_file.fileno())
-        os.replace(temporary_path, TOKEN_FILE)
-    except OSError as exc:
-        if temporary_path is not None:
-            try:
-                temporary_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-        raise OAuthStorageError("Could not save Google OAuth tokens.") from exc

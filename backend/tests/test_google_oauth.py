@@ -1,15 +1,13 @@
 import asyncio
 import io
-import json
 import os
-import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlsplit
 
 from app.api.google_oauth import callback, start
+from app.services.gmail_access import GmailProfile
 from app.services.google_oauth import (
     OAuthConfigError,
     OAuthExchangeError,
@@ -17,7 +15,6 @@ from app.services.google_oauth import (
     OAuthTokens,
     configuration,
     exchange_code,
-    save_tokens,
 )
 
 
@@ -48,28 +45,6 @@ class GoogleOAuthTests(unittest.TestCase):
         self.assertEqual(tokens, OAuthTokens("private-value", "private-refresh"))
         self.assertEqual(send.call_args.args[0].full_url, "https://oauth2.googleapis.com/token")
 
-    def test_save_tokens_replaces_previous_grant(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            token_file = Path(directory) / "oauth_tokens.json"
-            with patch("app.services.google_oauth.TOKEN_FILE", token_file):
-                save_tokens(OAuthTokens("old-access", "old-refresh"))
-                save_tokens(OAuthTokens("new-access", None))
-            self.assertEqual(
-                json.loads(token_file.read_text(encoding="utf-8")),
-                {"access_token": "new-access", "refresh_token": None},
-            )
-
-    def test_save_failure_preserves_existing_grant(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            token_file = Path(directory) / "oauth_tokens.json"
-            token_file.write_text('{"access_token":"old-access"}', encoding="utf-8")
-            with patch("app.services.google_oauth.TOKEN_FILE", token_file):
-                with patch("app.services.google_oauth.os.replace", side_effect=OSError("disk error")):
-                    with self.assertRaises(OAuthStorageError):
-                        save_tokens(OAuthTokens("new-access", "new-refresh"))
-            self.assertEqual(json.loads(token_file.read_text(encoding="utf-8")), {"access_token": "old-access"})
-            self.assertEqual(list(Path(directory).glob(".oauth_tokens-*.tmp")), [])
-
     def test_exchange_handles_google_error(self) -> None:
         error = HTTPError("https://oauth2.googleapis.com/token", 400, "bad request", {}, None)
         with patch("app.services.google_oauth.urlopen", side_effect=error):
@@ -95,7 +70,7 @@ class GoogleOAuthTests(unittest.TestCase):
     def test_callback_handles_exchange_error_without_saving(self) -> None:
         with patch("app.api.google_oauth.configuration", return_value=("id", "secret", "redirect")):
             with patch("app.api.google_oauth.exchange_code", side_effect=OAuthExchangeError()):
-                with patch("app.api.google_oauth.save_tokens") as save:
+                with patch("app.api.google_oauth.store_account") as save:
                     response = asyncio.run(callback(code="private-code", state="expected", error=None, saved_state="expected"))
         self.assertEqual(response.status_code, 502)
         save.assert_not_called()
@@ -105,8 +80,9 @@ class GoogleOAuthTests(unittest.TestCase):
             unavailable = asyncio.run(callback(code="code", state="expected", error=None, saved_state="expected"))
         with patch("app.api.google_oauth.configuration", return_value=("id", "secret", "redirect")):
             with patch("app.api.google_oauth.exchange_code", return_value=OAuthTokens("private-access", None)):
-                with patch("app.api.google_oauth.save_tokens", side_effect=OAuthStorageError()):
-                    unsaved = asyncio.run(callback(code="code", state="expected", error=None, saved_state="expected"))
+                with patch("app.api.google_oauth.profile_for_tokens", return_value=GmailProfile("me@example.com")):
+                    with patch("app.api.google_oauth.store_account", side_effect=OAuthStorageError()):
+                        unsaved = asyncio.run(callback(code="code", state="expected", error=None, saved_state="expected"))
         self.assertEqual(unavailable.status_code, 503)
         self.assertEqual(unsaved.status_code, 500)
         self.assertNotIn(b"private-access", unsaved.body)
@@ -114,9 +90,11 @@ class GoogleOAuthTests(unittest.TestCase):
     def test_callback_reports_success_without_tokens(self) -> None:
         with patch.dict(os.environ, {"GOOGLE_CLIENT_ID": "test-id", "GOOGLE_CLIENT_SECRET": "test-secret"}):
             with patch("app.api.google_oauth.exchange_code", return_value=OAuthTokens("private-access", "private-refresh")):
-                with patch("app.api.google_oauth.save_tokens") as save:
-                    with self.assertLogs("uvicorn.error", level="INFO") as recorded:
-                        response = asyncio.run(callback(code="private-code", state="expected", error=None, saved_state="expected"))
+                with patch("app.api.google_oauth.profile_for_tokens", return_value=GmailProfile("me@example.com")):
+                    with patch("app.api.google_oauth.store_account") as save:
+                        with patch("app.api.google_oauth.TOKEN_FILE"):
+                            with self.assertLogs("uvicorn.error", level="INFO") as recorded:
+                                response = asyncio.run(callback(code="private-code", state="expected", error=None, saved_state="expected"))
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response.headers["location"], "http://localhost:5173/?gmail=connected")
         self.assertNotIn("private-code", response.headers["location"])
@@ -125,7 +103,7 @@ class GoogleOAuthTests(unittest.TestCase):
         self.assertIn("access_token=True refresh_token=True", recorded.output[0])
         self.assertNotIn("private-code", recorded.output[0])
         self.assertNotIn("private-access", recorded.output[0])
-        save.assert_called_once_with(OAuthTokens("private-access", "private-refresh"))
+        save.assert_called_once_with("me@example.com", OAuthTokens("private-access", "private-refresh"))
 
 
 if __name__ == "__main__":

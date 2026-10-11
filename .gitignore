@@ -7,3 +7,4 @@ __pycache__/
 *.pyc
 /backend/oauth_tokens.json
 /backend/.oauth_tokens-*.tmp
+/backend/mail.db*

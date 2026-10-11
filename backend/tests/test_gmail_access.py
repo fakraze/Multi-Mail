@@ -1,22 +1,25 @@
 import io
-import json
-import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
 
-from app.services.gmail_access import GmailAccessError, get_profile, load_local_tokens, verify_gmail_access
+from app.services.gmail_access import GmailAccessError, GmailProfile, get_profile, load_local_tokens, verify_gmail_access
 from app.services.google_oauth import OAuthTokens
 
 
 class GmailAccessTests(unittest.TestCase):
     def test_loads_saved_grant_without_exposing_it(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "oauth_tokens.json"
-            path.write_text(json.dumps({"access_token": "private-access", "refresh_token": "private-refresh"}))
-            with patch("app.services.gmail_access.TOKEN_FILE", path):
-                self.assertEqual(load_local_tokens(), OAuthTokens("private-access", "private-refresh"))
+        path = Path("unused.json")
+        with patch("app.services.gmail_access.TOKEN_FILE", path):
+            with patch("app.services.persistence.stored_account", return_value=None):
+                with patch.object(Path, "read_text", return_value='{"access_token":"private-access","refresh_token":"private-refresh"}'):
+                    with patch.object(Path, "unlink") as unlink:
+                        with patch("app.services.gmail_access.profile_for_tokens", return_value=GmailProfile("me@example.com")):
+                            with patch("app.services.persistence.store_account") as save:
+                                self.assertEqual(load_local_tokens(), OAuthTokens("private-access", "private-refresh"))
+                                save.assert_called_once()
+                                unlink.assert_called_once()
 
     def test_profile_request_uses_backend_bearer_token(self) -> None:
         with patch("app.services.gmail_access.urlopen", return_value=io.BytesIO(b'{"emailAddress":"me@example.com"}')) as send:
@@ -41,8 +44,8 @@ class GmailAccessTests(unittest.TestCase):
         self.assertIn(b"grant_type=refresh_token", refresh_request.data)
 
     def test_missing_token_and_gmail_denial_are_safe_errors(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            with patch("app.services.gmail_access.TOKEN_FILE", Path(directory) / "missing.json"):
+        with patch("app.services.persistence.stored_account", return_value=None):
+            with patch.object(Path, "read_text", side_effect=FileNotFoundError):
                 with self.assertRaisesRegex(GmailAccessError, "Connect Gmail first"):
                     load_local_tokens()
         denied = HTTPError("https://gmail.googleapis.com/gmail/v1/users/me/profile", 403, "private response", {}, None)

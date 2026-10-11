@@ -13,8 +13,10 @@ from app.services.google_oauth import (
     configuration,
     exchange_code,
     frontend_url,
-    save_tokens,
 )
+from app.services.gmail_access import GmailAccessError, profile_for_tokens
+from app.services.persistence import store_account
+from app.services.google_oauth import TOKEN_FILE
 
 router = APIRouter(prefix="/auth/google")
 # Uvicorn configures this logger at INFO; its access logger remains disabled by the local launch command.
@@ -74,17 +76,25 @@ async def callback(
             client_id, client_secret, redirect_uri = configuration()
             tokens = await to_thread(exchange_code, code, client_id, client_secret, redirect_uri)
             home_url = frontend_url()
-            await to_thread(save_tokens, tokens)
+            profile = await to_thread(profile_for_tokens, tokens)
+            await to_thread(store_account, profile.email_address, tokens)
+            try:
+                TOKEN_FILE.unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Legacy OAuth token file could not be removed")
         except OAuthConfigError:
             response = result_page("Google connection is not configured.", 503)
         except OAuthExchangeError:
             logger.warning("Google OAuth token exchange failed")
             response = result_page("Google connection failed. Please try again.", 502)
+        except GmailAccessError:
+            logger.warning("Google OAuth Gmail profile check failed")
+            response = result_page("Gmail account could not be verified. Please try again.", 502)
         except OAuthStorageError:
             logger.warning("Google OAuth tokens could not be saved")
             response = result_page("Google authorization could not be saved. Please try again.", 500)
         else:
-            logger.info("Google OAuth tokens saved: access_token=True refresh_token=%s", bool(tokens.refresh_token))
+            logger.info("Google OAuth account saved: access_token=True refresh_token=%s", bool(tokens.refresh_token))
             response = RedirectResponse(f"{home_url}?gmail=connected", status_code=303)
             response.headers["Cache-Control"] = "no-store"
             response.headers["Referrer-Policy"] = "no-referrer"

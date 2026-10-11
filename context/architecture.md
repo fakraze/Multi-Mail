@@ -25,6 +25,13 @@
 - **Gmail**: Email content, threads, stars, labels, and mailbox state
 - Full Gmail mailboxes are not permanently copied into the local database
 
+### Single-account database cache (09-database)
+
+- `backend/mail.db` is an ignored local SQLite database accessed only through SQLAlchemy in the backend. It holds one connected account, its access and optional refresh token, cached message summaries with Gmail thread IDs, and requested mailbox pages. Reauthorizing replaces the account and clears cached pages and messages. A same-account grant that omits a refresh token retains the prior refresh token; a different account never inherits it. Credentials remain local plaintext and must be protected by local filesystem access.
+- A mailbox page is keyed by its label or search query and Gmail page token. Its stored ordered message IDs, sidebar labels, and next-page token preserve the existing API response. An existing page, including an empty page, is returned without a Gmail call. A missing page is fetched from Gmail and committed with its messages before returning. Individual message bodies continue to be read from Gmail and are not cached.
+- Gmail edits invalidate cached mailbox pages so later reads fetch Gmail state; this does not synchronize or refresh mail automatically. Cached message rows may be replaced on a later page miss. Gmail remains authoritative.
+- The existing `backend/oauth_tokens.json` is a legacy single-grant store. On first access it can be migrated to SQLite after Gmail profile verification, then removed. New OAuth callbacks identify the granted Gmail address before saving the account and credentials to SQLite. Refreshed access tokens are not persisted.
+
 ## Auth and Access Model
 
 - Gmail accounts are connected through Google OAuth 2.0
@@ -40,7 +47,7 @@
 - Google redirects to `GET /auth/google/callback` at the configured loopback URL. The backend checks state, exchanges the authorization code, and logs only whether access and refresh tokens were returned.
 - The callback displays a token-free error page on failure. On success, it saves the latest authorization's access token and optional refresh token to an ignored local JSON file, then redirects to the configured frontend home page. Tokens are never saved to SQLite or sent to the frontend. Saving a new grant replaces the previous file, including when Google omits a refresh token. The local backend launcher disables request access logs so callback authorization codes are not logged; direct Uvicorn runs must use `--no-access-log`.
 - Local configuration uses `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, a loopback `GOOGLE_REDIRECT_URI`, and a loopback `FRONTEND_URL` from backend environment variables or an ignored `backend/.env` file. Environment variables take precedence. The default callback is `http://127.0.0.1:8000/auth/google/callback`; the frontend home URL defaults to `http://localhost:5173/`, and its backend base URL defaults to `http://127.0.0.1:8000`.
-- The local token file is `backend/oauth_tokens.json`. It is backend-only, ignored by Git, written atomically with restrictive file permissions where supported, and contains only the latest grant. It is a temporary single-account store; multi-account persistence remains a later feature.
+- The historical local token file was `backend/oauth_tokens.json`. Feature 09 replaces it with `backend/mail.db`; the old file is read only for one-time migration.
 
 ### Gmail access verification (05-gmail-access)
 
@@ -57,7 +64,7 @@
 ### Backend Gmail state modification (06-gmail-modify)
 
 - A backend-only command accepts one explicit Gmail message ID and one action: star, unstar, add-label, or remove-label. Label actions additionally require an ID for a user label, Important, or a displayed Gmail category; the command checks it against the authorized account's labels. Other system labels remain unavailable to avoid changing read/unread or unrelated mailbox state.
-- The command reads `backend/oauth_tokens.json`, uses the latest grant for that account, refreshes an expired access token in memory if possible, and calls Gmail `users.messages.modify` with only the requested label change. It reads the same message again and reports success only when that message ID and label state match the request.
+- The command reads the latest grant from backend storage, refreshes an expired access token in memory if possible, and calls Gmail `users.messages.modify` with only the requested label change. It reads the same message again and reports success only when that message ID and label state match the request.
 - Gmail remains the sole store of message state. No modification route or frontend action contract is introduced in this backend verification unit.
 
 ### Connected-page Gmail actions and filters (06b-gmail-modify-ui)
@@ -86,6 +93,7 @@
 
 - The current connected mailbox exposes only Gmail user-created labels and the Important system label as selectable labels. The sidebar contains Inbox, Starred, Important, and user Labels; there is no Categories group or Purchases view. Gmail category IDs may still exist on messages as Gmail state, but they are not presented as app labels.
 - `GET /api/mailbox` returns only user labels and Important in its `labels` array. A `label_id` filter accepts `STARRED`, `IMPORTANT`, or a returned user label ID. Category and Purchases filters are invalid. `PATCH /api/messages/{message_id}/labels` accepts star changes, Important, or user label IDs; it rejects category IDs. The backend-only modify command follows the same label rule.
+- Important is a fixed supported Gmail system marker. The connected sidebar shows it immediately, and every mailbox response includes its label metadata even if Gmail omits it from `users.labels.list` or an older cached page lacks it.
 - The message label dialog lists Important and user labels only. When none of those are applied to a message, it says `No labels applied.` even if Gmail reports a category such as `CATEGORY_PERSONAL`. Its checkboxes still let the user add Important or a user label.
 
 ### Single-account Gmail search (07-gmail-search)

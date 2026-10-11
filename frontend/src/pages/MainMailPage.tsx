@@ -61,7 +61,6 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
   const visibleMessages = mailbox && accountEnabled ? mailbox.messages : []
   const highlightTerms = activeQuery ? searchHighlightTerms(activeQuery) : []
   const userLabels = mailbox?.labels.filter((label) => label.kind === 'user') ?? []
-  const important = mailbox?.labels.find((label) => label.id === 'IMPORTANT')
   const editableLabels = mailbox?.labels.filter((label) => label.modifiable) ?? []
   const appliedLabels = editableLabels.filter((label) => labelTarget?.label_ids.includes(label.id))
   const allSelected = visibleMessages.length > 0 && visibleMessages.every((item) => selectedIds.includes(item.id))
@@ -242,12 +241,10 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
             <button type="button" className="navigation-item" aria-current={folder === 'STARRED' ? 'page' : undefined} onClick={() => selectFolder('STARRED')}>
               <Star aria-hidden="true" size={20} /> Starred
             </button>
-            {important && (
-              <button type="button" className="navigation-item" aria-current={folder === 'IMPORTANT' ? 'page' : undefined}
-                onClick={() => selectFolder('IMPORTANT')}>
-                <Tag aria-hidden="true" size={20} /> Important
-              </button>
-            )}
+            <button type="button" className="navigation-item" aria-current={folder === 'IMPORTANT' ? 'page' : undefined}
+              onClick={() => selectFolder('IMPORTANT')}>
+              <Tag aria-hidden="true" size={20} /> Important
+            </button>
             <div className="label-navigation-heading">
               <button
                 type="button"

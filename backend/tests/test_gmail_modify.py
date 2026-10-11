@@ -27,7 +27,7 @@ class GmailModifyTests(unittest.TestCase):
                     [{"labels": [
                         {"id": "Label_1", "type": "user"},
                         {"id": "IMPORTANT", "type": "system"},
-                    ]}] if label_id else []
+                    ]}] if label_id and label_id != "IMPORTANT" else []
                 ) + [{"id": "abc", "labelIds": before}, {"id": "abc", "labelIds": after}]
                 client.post_json.return_value = {"id": "abc"}
 

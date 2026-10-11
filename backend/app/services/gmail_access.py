@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.services.google_oauth import TOKEN_FILE, TOKEN_URL, OAuthConfigError, OAuthTokens, configuration
 
@@ -25,6 +26,14 @@ class GmailProfile:
 
 
 def load_local_tokens() -> OAuthTokens:
+    from app.services.persistence import store_account, stored_account
+
+    try:
+        stored = stored_account()
+    except (OSError, SQLAlchemyError) as exc:
+        raise GmailAccessError("Could not read the local OAuth grant.") from exc
+    if stored is not None:
+        return stored[1]
     try:
         data = json.loads(TOKEN_FILE.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
@@ -37,7 +46,23 @@ def load_local_tokens() -> OAuthTokens:
     refresh_token = data.get("refresh_token")
     if refresh_token is not None and (not isinstance(refresh_token, str) or not refresh_token):
         raise GmailAccessError("The local OAuth grant has an invalid refresh token.")
-    return OAuthTokens(data["access_token"], refresh_token)
+    tokens = OAuthTokens(data["access_token"], refresh_token)
+    try:
+        profile = profile_for_tokens(tokens)
+        store_account(profile.email_address, tokens)
+        TOKEN_FILE.unlink(missing_ok=True)
+    except (GmailAccessError, OAuthStorageError, OSError, SQLAlchemyError) as exc:
+        raise GmailAccessError("Could not migrate the local OAuth grant.") from exc
+    return tokens
+
+
+def profile_for_tokens(tokens: OAuthTokens) -> GmailProfile:
+    try:
+        return get_profile(tokens.access_token)
+    except ExpiredAccessError as exc:
+        if not tokens.refresh_token:
+            raise GmailAccessError("Google access has expired. Connect Gmail again.") from exc
+    return get_profile(refresh_access_token(tokens.refresh_token))
 
 
 def refresh_access_token(refresh_token: str) -> str:
@@ -84,10 +109,4 @@ def get_profile(access_token: str) -> GmailProfile:
 
 
 def verify_gmail_access() -> GmailProfile:
-    tokens = load_local_tokens()
-    try:
-        return get_profile(tokens.access_token)
-    except ExpiredAccessError as exc:
-        if not tokens.refresh_token:
-            raise GmailAccessError("Google access has expired. Connect Gmail again.") from exc
-    return get_profile(refresh_access_token(tokens.refresh_token))
+    return profile_for_tokens(load_local_tokens())

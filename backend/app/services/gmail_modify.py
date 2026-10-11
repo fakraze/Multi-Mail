@@ -21,6 +21,8 @@ def message_labels(client: GmailClient, message_id: str) -> set[str]:
 def check_modifiable_label(client: GmailClient, label_id: str) -> None:
     if not MESSAGE_ID.fullmatch(label_id):
         raise GmailAccessError("Invalid label ID.")
+    if label_id == "IMPORTANT":
+        return
     data = client.get_json(LABELS_URL)
     labels = data.get("labels", [])
     if not isinstance(labels, list):

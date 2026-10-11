@@ -1,13 +1,23 @@
 from asyncio import to_thread
 
 from fastapi import APIRouter, HTTPException, Query
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.schemas.mailbox import CreateLabel, LabelChange, MailLabel, Mailbox, MessageDetail, MessageLabels
 from app.services.gmail_access import GmailAccessError
-from app.services.gmail_inbox import mailbox, read_message
+from app.services.cached_mailbox import mailbox
+from app.services.gmail_inbox import read_message
 from app.services.gmail_modify import create_label, delete_label, modify_message
+from app.services.persistence import invalidate_mailbox_cache
 
 router = APIRouter(prefix="/api")
+
+
+async def clear_cached_pages() -> None:
+    try:
+        await to_thread(invalidate_mailbox_cache)
+    except (OSError, SQLAlchemyError) as exc:
+        raise HTTPException(status_code=500, detail="Could not update the local mail cache.") from exc
 
 
 def api_error(exc: GmailAccessError) -> HTTPException:
@@ -46,15 +56,18 @@ async def change_message_label(message_id: str, change: LabelChange) -> MessageL
         labels = await to_thread(modify_message, message_id, action, label_id, change.account, True)
     except GmailAccessError as exc:
         raise api_error(exc) from exc
+    await clear_cached_pages()
     return MessageLabels(id=message_id, account=change.account, label_ids=sorted(labels), starred="STARRED" in labels)
 
 
 @router.post("/labels", response_model=MailLabel)
 async def add_label(request: CreateLabel) -> MailLabel:
     try:
-        return MailLabel.model_validate(await to_thread(create_label, request.name, request.account))
+        result = MailLabel.model_validate(await to_thread(create_label, request.name, request.account))
     except GmailAccessError as exc:
         raise api_error(exc) from exc
+    await clear_cached_pages()
+    return result
 
 
 @router.delete("/labels/{label_id}", status_code=204)
@@ -63,3 +76,4 @@ async def remove_label(label_id: str, account: str = Query()) -> None:
         await to_thread(delete_label, label_id, account)
     except GmailAccessError as exc:
         raise api_error(exc) from exc
+    await clear_cached_pages()
