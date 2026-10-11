@@ -246,6 +246,24 @@
   font-size: 15px;
 }
 
+.bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.bulk-actions [data-slot='button'] {
+  gap: 5px;
+}
+
+.bulk-count {
+  margin-right: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .sync-status {
   color: var(--text-muted);
   font-size: 12px;

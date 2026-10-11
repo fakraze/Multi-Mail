@@ -4,11 +4,11 @@ Update this file after every meaningful implementation change.
 
 ## Current Phase
 
-- 11 Optimistic Mail Actions in progress
+- 12 Bulk Mail Actions completed; ready for the next feature.
 
 ## Current Goal
 
-- Apply single-message star and label edits immediately, persist confirmed Gmail state locally, and recover from failed edits.
+- Select the next feature unit from the remaining roadmap.
 
 ## Completed
 
@@ -36,13 +36,17 @@ Update this file after every meaningful implementation change.
 
 **09-database:** Added ignored SQLite storage through SQLAlchemy for one connected Gmail account, backend-only OAuth credentials, message summaries, and mailbox pages. Requested pages are read from SQLite when present and fetched from Gmail and cached when absent. Confirmed Gmail label and star actions invalidate cached pages; there is no automatic sync. A legacy token file is migrated on first access. Persistence across a new database connection and cache hit/miss behavior are covered by tests. All 38 backend tests and the frontend production build passed.
 
+**10-background-sync:** Added a SQLite Gmail history cursor, first-connection Inbox sync, and a sync endpoint that uses paginated Gmail history to refresh only requested mailbox pages when needed. Manual refresh and the one-minute timer keep existing mail visible; the toolbar shows loading feedback for manual refresh. Folder, search, pagination, and cached-page reloads also retain the prior rows until the next view succeeds. All 46 backend tests, frontend lint, and production build passed.
+
+**11-background-modify:** Added optimistic star, unstar, add-label, and remove-label actions. Controls stay interactive and fully opaque while changes run in the background. Consecutive changes to one message appear immediately and reach Gmail in click order; different messages can update concurrently. On failure the UI reconciles with Gmail or restores the last confirmed state, then reapplies queued changes. The backend stores Gmail-confirmed labels and star state in the cached message row while invalidating pages in one transaction; failed Gmail requests leave SQLite unchanged. All 49 backend tests, frontend lint, and production build passed. Pushed to `origin/main` in commit `3ae1ff6`.
+
+**12-multi-modify:** Added current-page bulk controls for explicit star, unstar, add-label, and remove-label actions. Every selected message changes on screen immediately; the Gmail-confirmed requests run in the background through the existing per-message queues, with controls still interactive. Each successful request updates its cached summary. The selection and selected rows remain visible after the action, including when a row no longer matches the current filter. Search results outside INBOX disable bulk modifications in keeping with the existing API restriction. Frontend lint and production build passed after the background update; all 49 backend tests passed for the unchanged modification route. Live Gmail verification was not run.
+
+**Current-folder sidebar refresh:** Clicking the currently active Inbox, Starred, Important, or user label now runs the same manual Gmail sync as toolbar Refresh, while keeping the current mail list visible during loading. Frontend lint and production build passed.
+
 ## In Progress
 
-- **11-background-modify:** In progress. Star and label controls now stay interactive and fully opaque during background changes. Consecutive changes to one message are shown immediately and sent to Gmail in click order; different messages can update concurrently. On failure the UI reconciles with Gmail or restores the last confirmed state, then reapplies queued changes. The backend saves Gmail-confirmed labels and star state to the cached message row while invalidating pages in one transaction; failed Gmail requests leave SQLite unchanged. Frontend lint and production build pass after this fix. Live Gmail verification is pending.
-
-- **10-background-sync:** In progress. Sync remains bounded to requested mailbox pages rather than copying the full Gmail mailbox.
-  Added a SQLite history cursor and migration, a sync endpoint that checks paginated Gmail history and rebuilds a page after changes or when incremental sync cannot continue, and first-connection Inbox sync. The connected page keeps mail rendered during manual and minute-timer synchronization, shows `Loading` only for manual refresh, and rereads cached mail after success. The timer resets after manual refresh. The API and storage docs were updated. All 46 backend tests, frontend lint, and production build pass. Live Gmail verification is still pending.
-  Fixed connected folder, search, pagination, and cached-page reload transitions so the previously displayed rows remain mounted while the next view loads. Loading appears in the toolbar; the old rows are replaced only after the request succeeds and remain visible on failure. Frontend lint and production build pass after this fix.
+- None.
 
 ## Next Up
 

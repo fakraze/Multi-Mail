@@ -4,6 +4,7 @@ import { ArrowLeft, ChevronDown, ChevronLeft, ChevronRight, Inbox, Plus, Refresh
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
@@ -30,8 +31,8 @@ function formatListTime(value: string): string {
     : date.toLocaleDateString()
 }
 
-type PendingLabelChange = { labelId: string; present: boolean }
-type MessageChangeQueue = { base: MessageLabels; pending: PendingLabelChange[]; processing: boolean }
+type PendingLabelChange = { labelId: string; present: boolean; resolve: (success: boolean) => void }
+type MessageChangeQueue = { base: MessageLabels; pending: PendingLabelChange[]; processing: boolean; preserveInView: boolean }
 
 function applyPendingLabels(base: MessageLabels, pending: PendingLabelChange[]): MessageLabels {
   const labelIds = new Set(base.label_ids)
@@ -62,6 +63,7 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
   const labelOverrides = useRef(new Map<string, MessageLabels>())
   const labelRevision = useRef(0)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [bulkPendingCount, setBulkPendingCount] = useState(0)
   const [accountEnabled, setAccountEnabled] = useState(true)
   const [labelsExpanded, setLabelsExpanded] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
@@ -88,6 +90,8 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
   const appliedLabels = editableLabels.filter((label) => labelTarget?.label_ids.includes(label.id))
   const allSelected = visibleMessages.length > 0 && visibleMessages.every((item) => selectedIds.includes(item.id))
   const someSelected = visibleMessages.some((item) => selectedIds.includes(item.id))
+  const selectedMessages = visibleMessages.filter((item) => selectedIds.includes(item.id))
+  const bulkUnavailable = loading || selectedMessages.some((item) => !item.label_ids.includes('INBOX'))
 
   function withLabelOverride<T extends MailMessage>(item: T): T {
     const labels = labelOverrides.current.get(item.id)
@@ -205,6 +209,7 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
     if (nextFolder === folder && activeQuery === null) {
       setMessage(null)
       setSelectedIds([])
+      void refreshMail(true)
       return
     }
     folderRef.current = nextFolder
@@ -233,28 +238,33 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
     setLoading(true)
   }
 
-  function changeLabel(item: MailMessage, labelId: string, present: boolean) {
+  function changeLabel(item: MailMessage, labelId: string, present: boolean,
+    preserveInView = false, startNow = true): Promise<boolean> {
     let queue = messageQueues.current.get(item.id)
     if (!queue) {
       queue = { base: { id: item.id, account: item.account,
-        label_ids: [...item.label_ids], starred: item.starred }, pending: [], processing: false }
+        label_ids: [...item.label_ids], starred: item.starred }, pending: [], processing: false, preserveInView }
       messageQueues.current.set(item.id, queue)
     }
-    queue.pending.push({ labelId, present })
+    if (preserveInView) queue.preserveInView = true
+    const result = new Promise<boolean>((resolve) => queue.pending.push({ labelId, present, resolve }))
     labelRevision.current += 1
     setError(null)
     const optimistic = applyPendingLabels(queue.base, queue.pending)
     labelOverrides.current.set(item.id, optimistic)
     updateVisibleMessage(optimistic)
-    if (!queue.processing) void processMessageChanges(item.id, queue)
+    if (startNow && !queue.processing) void processMessageChanges(item.id, queue)
+    return result
   }
 
   async function processMessageChanges(messageId: string, queue: MessageChangeQueue) {
     queue.processing = true
     while (queue.pending.length > 0) {
       const change = queue.pending[0]
+      let success = false
       try {
         queue.base = await setMessageLabel(messageId, queue.base.account, change.labelId, change.present)
+        success = true
       } catch (cause) {
         // A request can fail after Gmail applied it. Read Gmail once before rolling back.
         try {
@@ -272,10 +282,33 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
       labelRevision.current += 1
       const displayed = applyPendingLabels(queue.base, queue.pending)
       labelOverrides.current.set(messageId, displayed)
-      updateVisibleMessage(displayed, queue.pending.length === 0)
+      updateVisibleMessage(displayed, queue.pending.length === 0 && !queue.preserveInView)
+      change.resolve(success)
     }
     messageQueues.current.delete(messageId)
     queue.processing = false
+  }
+
+  function applyBulkChange(labelId: string, present: boolean) {
+    if (selectedMessages.length === 0 || bulkUnavailable) return
+    const targets = [...selectedMessages]
+    // Queue every optimistic edit before waiting for any Gmail response.
+    const results = targets.map((item) => changeLabel(item, labelId, present, true, false))
+    setBulkPendingCount((count) => count + 1)
+    setError(null)
+    void (async () => {
+      let failures = 0
+      try {
+        for (const [index, item] of targets.entries()) {
+          const queue = messageQueues.current.get(item.id)
+          if (queue && !queue.processing) void processMessageChanges(item.id, queue)
+          if (!await results[index]) failures += 1
+        }
+        if (failures > 0) setError(`Could not update ${failures} of ${targets.length} selected messages. Check their current Gmail state and try again.`)
+      } finally {
+        setBulkPendingCount((count) => count - 1)
+      }
+    })()
   }
 
   async function submitNewLabel(event: FormEvent<HTMLFormElement>) {
@@ -459,6 +492,50 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
                 disabled={!accountEnabled}
               />
             </form>
+            {!message && selectedMessages.length > 0 && (
+              <div className="bulk-actions" aria-label="Bulk mail actions">
+                <span className="bulk-count">{selectedMessages.length} selected</span>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="sm" disabled={bulkUnavailable} aria-label="Bulk star actions">
+                      <Star aria-hidden="true" size={16} /> Star <ChevronDown aria-hidden="true" size={16} />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onSelect={() => void applyBulkChange('STARRED', true)}>Star selected</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => void applyBulkChange('STARRED', false)}>Unstar selected</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="sm" disabled={bulkUnavailable} aria-label="Bulk label actions">
+                      <Tag aria-hidden="true" size={16} /> Label <ChevronDown aria-hidden="true" size={16} />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>Add label</DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent>
+                        {editableLabels.map((label) => <DropdownMenuItem key={label.id}
+                          onSelect={() => void applyBulkChange(label.id, true)}>{label.name}</DropdownMenuItem>)}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>Remove label</DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent>
+                        {editableLabels.map((label) => <DropdownMenuItem key={label.id}
+                          onSelect={() => void applyBulkChange(label.id, false)}>{label.name}</DropdownMenuItem>)}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                    {editableLabels.length === 0 && <DropdownMenuItem disabled>No editable labels</DropdownMenuItem>}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            )}
+            {bulkPendingCount > 0 && <span className="sync-status" role="status">Updating selected mail…</span>}
+            {bulkPendingCount === 0 && selectedMessages.some((item) => !item.label_ids.includes('INBOX')) && (
+              <span className="sync-status">Only inbox messages can be changed.</span>
+            )}
           </div>
 
 

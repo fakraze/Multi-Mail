@@ -45,6 +45,12 @@
 - The existing label modification API still responds only after Gmail verifies the resulting label set. After verification, the backend updates that message's cached summary, when present, and invalidates cached mailbox pages in the same SQLite transaction. No speculative state is written to SQLite. A failed Gmail request leaves the local cache unchanged.
 - Gmail remains authoritative. A later mailbox load or sync may replace local summaries with current Gmail state.
 
+### Bulk mail actions (12-multi-modify)
+
+- The connected page applies bulk star, unstar, add-label, and remove-label commands to the selected messages on the current page. The existing `PATCH /api/messages/{message_id}/labels` route handles each message separately, verifies Gmail state, and updates its cached summary before returning. Bulk actions do not introduce a new Gmail or database API.
+- The user chooses an explicit add or remove operation for one label, including Important. Bulk controls require every selected message to be in INBOX, matching the existing modification route's restriction. A selection containing a search result outside INBOX cannot be modified and is explained in the toolbar.
+- A bulk command queues an optimistic change for every selected message before the first Gmail request completes. The requests then run in the background, one selected message at a time, through the existing per-message action queues. Controls remain interactive; later changes to a message follow its queued bulk change. Other mail remains untouched. A bulk operation retains selected IDs and keeps selected rows visible even when an updated star or label no longer matches the current filter; a later navigation or refresh reloads Gmail's current page membership. Individual failures are reconciled using the existing queue behavior and reported after the run.
+
 ## Auth and Access Model
 
 - Gmail accounts are connected through Google OAuth 2.0

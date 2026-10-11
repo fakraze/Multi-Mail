@@ -42,6 +42,7 @@ Use reusable React components styled to match Gmail. Avoid components with heavy
 ## Layout Patterns
 
 - The Multi Mail title in the upper-left sidebar is a keyboard-accessible home button. It returns the current sample or connected mail view to its Inbox, clearing an active search or opened message in the connected view.
+- On the connected page, clicking the current folder or label in the left sidebar refreshes that view through the same Gmail sync as the toolbar Refresh button. The current page stays visible while it loads.
 - Top bar with a large rounded search field.
 - Left sidebar for inbox, starred, labels, and connected accounts.
 - Main area for compact email rows.
