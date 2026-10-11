@@ -39,6 +39,12 @@
 - The connected frontend calls the sync endpoint on manual Refresh and every minute. Manual Refresh resets the minute timer and shows `Loading`; automatic sync is silent. Existing messages stay rendered during both. After success the frontend reads the requested page from SQLite via `GET /api/mailbox`; after failure it leaves the prior list visible and reports the error.
 - The existing `backend/oauth_tokens.json` is a legacy single-grant store. On first access it can be migrated to SQLite after Gmail profile verification, then removed. New OAuth callbacks identify the granted Gmail address before saving the account and credentials to SQLite. Refreshed access tokens are not persisted.
 
+### Optimistic single-message actions (11-background-modify)
+
+- Star and label controls update the visible message, opened message, and label dialog immediately. Controls remain interactive during a pending change. Changes to the same message are sent to Gmail in user order while independent messages can update concurrently. Pending changes remain visible over mailbox reloads. On request failure, the frontend reads the message from Gmail once to reconcile an uncertain outcome; if that read fails, it restores the prior confirmed state, then reapplies later queued changes. It shows an error and keeps other mail visible throughout.
+- The existing label modification API still responds only after Gmail verifies the resulting label set. After verification, the backend updates that message's cached summary, when present, and invalidates cached mailbox pages in the same SQLite transaction. No speculative state is written to SQLite. A failed Gmail request leaves the local cache unchanged.
+- Gmail remains authoritative. A later mailbox load or sync may replace local summaries with current Gmail state.
+
 ## Auth and Access Model
 
 - Gmail accounts are connected through Google OAuth 2.0

@@ -8,7 +8,8 @@ from app.services.gmail_access import GmailAccessError
 from app.services.cached_mailbox import mailbox
 from app.services.gmail_inbox import read_message
 from app.services.gmail_modify import create_label, delete_label, modify_message
-from app.services.persistence import invalidate_mailbox_cache
+from app.services.google_oauth import OAuthStorageError
+from app.services.persistence import invalidate_mailbox_cache, store_confirmed_message_labels
 from app.services.mail_sync import sync_mailbox
 
 router = APIRouter(prefix="/api")
@@ -66,7 +67,10 @@ async def change_message_label(message_id: str, change: LabelChange) -> MessageL
         labels = await to_thread(modify_message, message_id, action, label_id, change.account, True)
     except GmailAccessError as exc:
         raise api_error(exc) from exc
-    await clear_cached_pages()
+    try:
+        await to_thread(store_confirmed_message_labels, change.account, message_id, labels)
+    except (OSError, SQLAlchemyError, OAuthStorageError) as exc:
+        raise HTTPException(status_code=500, detail="Could not update the local mail cache.") from exc
     return MessageLabels(id=message_id, account=change.account, label_ids=sorted(labels), starred="STARRED" in labels)
 
 

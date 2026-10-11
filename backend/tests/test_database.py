@@ -1,3 +1,4 @@
+import json
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -5,7 +6,7 @@ from unittest.mock import patch
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-from app.models.database import Account, Base, CachedMessage
+from app.models.database import Account, Base, CachedMessage, CachedPage
 from app.services.cached_mailbox import mailbox
 from app.services.google_oauth import OAuthTokens
 from app.services import persistence
@@ -73,6 +74,23 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(result["labels"], [{"id": "IMPORTANT", "name": "Important", "kind": "system",
                                               "modifiable": True, "deletable": False}])
         gmail.assert_not_called()
+
+    def test_confirmed_labels_update_cached_row_and_invalidate_pages(self) -> None:
+        persistence.store_account("one@example.com", OAuthTokens("private-access", None))
+        persistence.store_mailbox(None, None, None, self.mailbox_result())
+        persistence.store_confirmed_message_labels("one@example.com", "message-1", {"INBOX", "Label_1"})
+        with persistence.SessionLocal() as session:
+            row = session.scalar(select(CachedMessage))
+            self.assertFalse(row.starred)
+            self.assertEqual(set(json.loads(row.label_ids_json)), {"INBOX", "Label_1"})
+            self.assertEqual(session.scalars(select(CachedPage)).all(), [])
+
+    def test_rejected_account_leaves_cached_message_and_page_unchanged(self) -> None:
+        persistence.store_account("one@example.com", OAuthTokens("private-access", None))
+        persistence.store_mailbox(None, None, None, self.mailbox_result())
+        with self.assertRaisesRegex(Exception, "account changed"):
+            persistence.store_confirmed_message_labels("other@example.com", "message-1", {"INBOX"})
+        self.assertTrue(persistence.cached_mailbox(None, None, None)["messages"][0]["starred"])
 
     @staticmethod
     def mailbox_result() -> dict[str, object]:

@@ -143,3 +143,17 @@ def invalidate_mailbox_cache() -> None:
     initialize_database()
     with SessionLocal.begin() as session:
         session.execute(delete(CachedPage))
+
+
+def store_confirmed_message_labels(address: str, message_id: str, labels: set[str]) -> None:
+    """Save Gmail-confirmed labels and expire page membership atomically."""
+    initialize_database()
+    with SessionLocal.begin() as session:
+        account = session.scalar(select(Account).limit(1))
+        if account is None or account.email_address != address:
+            raise OAuthStorageError("The connected Gmail account changed. Refresh the page.")
+        row = session.get(CachedMessage, (account.id, message_id))
+        if row is not None:
+            row.label_ids_json = json.dumps(sorted(labels))
+            row.starred = "STARRED" in labels
+        session.execute(delete(CachedPage).where(CachedPage.account_id == account.id))

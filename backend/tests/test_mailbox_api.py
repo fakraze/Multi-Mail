@@ -29,13 +29,26 @@ class MailboxApiTests(unittest.TestCase):
         service.assert_called_once_with(None, "from:alice@example.com", "next-token")
 
     def test_star_route_returns_confirmed_labels_and_account_scope(self) -> None:
-        with patch("app.api.mailbox.modify_message", return_value={"INBOX", "STARRED"}) as service:
+        with patch("app.api.mailbox.modify_message", return_value={"INBOX", "STARRED"}) as service, \
+             patch("app.api.mailbox.store_confirmed_message_labels") as store:
             result = asyncio.run(change_message_label("abc", LabelChange(
                 account="me@example.com", label_id="STARRED", present=True,
             )))
         self.assertTrue(result.starred)
         self.assertEqual(result.label_ids, ["INBOX", "STARRED"])
         service.assert_called_once_with("abc", "star", None, "me@example.com", True)
+        store.assert_called_once_with("me@example.com", "abc", {"INBOX", "STARRED"})
+
+    def test_failed_gmail_modification_does_not_write_cache(self) -> None:
+        from app.services.gmail_access import GmailAccessError
+
+        with patch("app.api.mailbox.modify_message", side_effect=GmailAccessError("Gmail failed")), \
+             patch("app.api.mailbox.store_confirmed_message_labels") as store:
+            with self.assertRaises(Exception):
+                asyncio.run(change_message_label("abc", LabelChange(
+                    account="me@example.com", label_id="STARRED", present=False,
+                )))
+        store.assert_not_called()
 
     def test_create_label_route_returns_verified_label(self) -> None:
         with patch("app.api.mailbox.create_label", return_value={

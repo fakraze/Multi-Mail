@@ -4,11 +4,11 @@ Update this file after every meaningful implementation change.
 
 ## Current Phase
 
-- 10 Background Mail Sync in progress
+- 11 Optimistic Mail Actions in progress
 
 ## Current Goal
 
-- Implement first-connection full sync, history-based incremental sync, and quiet one-minute refresh while preserving visible mail.
+- Apply single-message star and label edits immediately, persist confirmed Gmail state locally, and recover from failed edits.
 
 ## Completed
 
@@ -37,6 +37,8 @@ Update this file after every meaningful implementation change.
 **09-database:** Added ignored SQLite storage through SQLAlchemy for one connected Gmail account, backend-only OAuth credentials, message summaries, and mailbox pages. Requested pages are read from SQLite when present and fetched from Gmail and cached when absent. Confirmed Gmail label and star actions invalidate cached pages; there is no automatic sync. A legacy token file is migrated on first access. Persistence across a new database connection and cache hit/miss behavior are covered by tests. All 38 backend tests and the frontend production build passed.
 
 ## In Progress
+
+- **11-background-modify:** In progress. Star and label controls now stay interactive and fully opaque during background changes. Consecutive changes to one message are shown immediately and sent to Gmail in click order; different messages can update concurrently. On failure the UI reconciles with Gmail or restores the last confirmed state, then reapplies queued changes. The backend saves Gmail-confirmed labels and star state to the cached message row while invalidating pages in one transaction; failed Gmail requests leave SQLite unchanged. Frontend lint and production build pass after this fix. Live Gmail verification is pending.
 
 - **10-background-sync:** In progress. Sync remains bounded to requested mailbox pages rather than copying the full Gmail mailbox.
   Added a SQLite history cursor and migration, a sync endpoint that checks paginated Gmail history and rebuilds a page after changes or when incremental sync cannot continue, and first-connection Inbox sync. The connected page keeps mail rendered during manual and minute-timer synchronization, shows `Loading` only for manual refresh, and rereads cached mail after success. The timer resets after manual refresh. The API and storage docs were updated. All 46 backend tests, frontend lint, and production build pass. Live Gmail verification is still pending.

@@ -10,7 +10,7 @@ import { Separator } from '@/components/ui/separator'
 import SearchHighlight from '@/components/SearchHighlight'
 import { searchHighlightTerms } from '@/lib/searchHighlight'
 import { createGmailLabel, deleteGmailLabel, fetchMailbox, fetchMessage, setMessageLabel, syncMailbox } from '@/services/mailbox'
-import type { Mailbox, MailLabel, MailMessage, MessageDetail } from '@/types/mail'
+import type { Mailbox, MailLabel, MailMessage, MessageDetail, MessageLabels } from '@/types/mail'
 
 import '../App.css'
 
@@ -30,6 +30,18 @@ function formatListTime(value: string): string {
     : date.toLocaleDateString()
 }
 
+type PendingLabelChange = { labelId: string; present: boolean }
+type MessageChangeQueue = { base: MessageLabels; pending: PendingLabelChange[]; processing: boolean }
+
+function applyPendingLabels(base: MessageLabels, pending: PendingLabelChange[]): MessageLabels {
+  const labelIds = new Set(base.label_ids)
+  for (const change of pending) {
+    if (change.present) labelIds.add(change.labelId)
+    else labelIds.delete(change.labelId)
+  }
+  return { ...base, label_ids: [...labelIds], starred: labelIds.has('STARRED') }
+}
+
 function MainMailPage({ onConnect }: { onConnect: () => void }) {
   const [mailbox, setMailbox] = useState<Mailbox | null>(null)
   const [message, setMessage] = useState<MessageDetail | null>(null)
@@ -46,7 +58,9 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
   const [deleteTarget, setDeleteTarget] = useState<MailLabel | null>(null)
   const [deletingLabel, setDeletingLabel] = useState(false)
   const [deleteLabelError, setDeleteLabelError] = useState<string | null>(null)
-  const [busyMessageId, setBusyMessageId] = useState<string | null>(null)
+  const messageQueues = useRef(new Map<string, MessageChangeQueue>())
+  const labelOverrides = useRef(new Map<string, MessageLabels>())
+  const labelRevision = useRef(0)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [accountEnabled, setAccountEnabled] = useState(true)
   const [labelsExpanded, setLabelsExpanded] = useState(false)
@@ -75,6 +89,26 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
   const allSelected = visibleMessages.length > 0 && visibleMessages.every((item) => selectedIds.includes(item.id))
   const someSelected = visibleMessages.some((item) => selectedIds.includes(item.id))
 
+  function withLabelOverride<T extends MailMessage>(item: T): T {
+    const labels = labelOverrides.current.get(item.id)
+    return labels && labels.account === item.account
+      ? { ...item, label_ids: labels.label_ids, starred: labels.starred }
+      : item
+  }
+
+  function updateVisibleMessage(labels: MessageLabels, removeFromFilter = false) {
+    const update = <T extends MailMessage>(item: T): T => item.id === labels.id && item.account === labels.account
+      ? { ...item, label_ids: labels.label_ids, starred: labels.starred }
+      : item
+    setMailbox((current) => current && {
+      ...current,
+      messages: current.messages.map(update).filter((item) => !removeFromFilter ||
+        activeQuery !== null || folder === 'INBOX' || item.label_ids.includes(folder)),
+    })
+    setMessage((current) => current ? update(current) : null)
+    setLabelTarget((current) => current ? update(current) : null)
+  }
+
   function reload() {
     setLoading(true)
     setError(null)
@@ -96,6 +130,7 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
       return
     }
     const originalView = viewKey
+    const originalLabelRevision = labelRevision.current
     const task = (async () => {
       try {
         await syncMailbox(activeQuery ? undefined : folder === 'INBOX' ? undefined : folder,
@@ -104,7 +139,8 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
           const result = await fetchMailbox(activeQuery ? undefined : folder === 'INBOX' ? undefined : folder,
             undefined, activeQuery ?? undefined, requestedPageToken)
           if (viewKeyRef.current === originalView) {
-            setMailbox(result)
+            if (labelRevision.current === originalLabelRevision && messageQueues.current.size === 0) labelOverrides.current.clear()
+            setMailbox({ ...result, messages: result.messages.map(withLabelOverride) })
             setError(null)
           }
         }
@@ -134,7 +170,7 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
       controller.signal, activeQuery ?? undefined, requestedPageToken)
       .then((result) => {
         if (controller.signal.aborted) return
-        setMailbox(result)
+        setMailbox({ ...result, messages: result.messages.map(withLabelOverride) })
         setDisplayedQuery(activeQuery)
         setLoadedPage(page)
         setError(null)
@@ -197,28 +233,49 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
     setLoading(true)
   }
 
-  async function changeLabel(item: MailMessage, labelId: string, present: boolean) {
-    if (busyMessageId) return
-    setBusyMessageId(item.id)
-    setError(null)
-    try {
-      const result = await setMessageLabel(item.id, item.account, labelId, present)
-      if (folderRef.current !== folder) return
-      const update = <T extends MailMessage>(mail: T): T => mail.id === item.id
-        ? { ...mail, label_ids: result.label_ids, starred: result.starred }
-        : mail
-      setMailbox((current) => current && {
-        ...current,
-        messages: current.messages.map(update).filter((mail) =>
-          activeQuery !== null || folder === 'INBOX' || mail.label_ids.includes(folder)),
-      })
-      setMessage((current) => current ? update(current) : null)
-      setLabelTarget((current) => current ? update(current) : null)
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not change the Gmail label.')
-    } finally {
-      setBusyMessageId(null)
+  function changeLabel(item: MailMessage, labelId: string, present: boolean) {
+    let queue = messageQueues.current.get(item.id)
+    if (!queue) {
+      queue = { base: { id: item.id, account: item.account,
+        label_ids: [...item.label_ids], starred: item.starred }, pending: [], processing: false }
+      messageQueues.current.set(item.id, queue)
     }
+    queue.pending.push({ labelId, present })
+    labelRevision.current += 1
+    setError(null)
+    const optimistic = applyPendingLabels(queue.base, queue.pending)
+    labelOverrides.current.set(item.id, optimistic)
+    updateVisibleMessage(optimistic)
+    if (!queue.processing) void processMessageChanges(item.id, queue)
+  }
+
+  async function processMessageChanges(messageId: string, queue: MessageChangeQueue) {
+    queue.processing = true
+    while (queue.pending.length > 0) {
+      const change = queue.pending[0]
+      try {
+        queue.base = await setMessageLabel(messageId, queue.base.account, change.labelId, change.present)
+      } catch (cause) {
+        // A request can fail after Gmail applied it. Read Gmail once before rolling back.
+        try {
+          const current = await fetchMessage(messageId)
+          if (current.account === queue.base.account) {
+            queue.base = { id: current.id, account: current.account,
+              label_ids: current.label_ids, starred: current.starred }
+          }
+        } catch {
+          // Keep the last confirmed state until a later sync.
+        }
+        setError(cause instanceof Error ? cause.message : 'Could not change the Gmail label.')
+      }
+      queue.pending.shift()
+      labelRevision.current += 1
+      const displayed = applyPendingLabels(queue.base, queue.pending)
+      labelOverrides.current.set(messageId, displayed)
+      updateVisibleMessage(displayed, queue.pending.length === 0)
+    }
+    messageQueues.current.delete(messageId)
+    queue.processing = false
   }
 
   async function submitNewLabel(event: FormEvent<HTMLFormElement>) {
@@ -272,7 +329,7 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
     setMessageLoading(true)
     setError(null)
     try {
-      setMessage(await fetchMessage(messageId))
+      setMessage(withLabelOverride(await fetchMessage(messageId)))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not open the message.')
     } finally {
@@ -430,7 +487,7 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
                     size="icon"
                     className={item.starred ? 'marked-action' : undefined}
                     aria-label={`${item.starred ? 'Unstar' : 'Star'} ${item.subject}`}
-                    disabled={loading || busyMessageId !== null || !item.label_ids.includes('INBOX')}
+                    disabled={loading || !item.label_ids.includes('INBOX')}
                     onClick={() => void changeLabel(item, 'STARRED', !item.starred)}
                   >
                     <Star aria-hidden="true" size={16} fill={item.starred ? 'currentColor' : 'none'} />
@@ -439,7 +496,7 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
                     variant="ghost"
                     size="icon"
                     aria-label={`Labels for ${item.subject}`}
-                    disabled={loading || busyMessageId !== null || !item.label_ids.includes('INBOX')}
+                    disabled={loading || !item.label_ids.includes('INBOX')}
                     onClick={() => setLabelTarget(item)}
                   >
                     <Tag aria-hidden="true" size={16} />
@@ -463,12 +520,12 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
               <article className="message-detail">
                 <h2>{message.subject}</h2>
                 <div className="detail-actions">
-                  <Button variant="ghost" size="sm" disabled={busyMessageId !== null || !message.label_ids.includes('INBOX')}
+                  <Button variant="ghost" size="sm" disabled={!message.label_ids.includes('INBOX')}
                     onClick={() => void changeLabel(message, 'STARRED', !message.starred)}>
                     <Star aria-hidden="true" size={16} fill={message.starred ? 'currentColor' : 'none'} />
                     {message.starred ? 'Unstar' : 'Star'}
                   </Button>
-                  <Button variant="ghost" size="sm" disabled={busyMessageId !== null || !message.label_ids.includes('INBOX')}
+                  <Button variant="ghost" size="sm" disabled={!message.label_ids.includes('INBOX')}
                     onClick={() => setLabelTarget(message)}>
                     <Tag aria-hidden="true" size={16} /> Labels
                   </Button>
@@ -519,7 +576,6 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
               <label className="label-option" key={label.id}>
                 <Checkbox
                   checked={labelTarget?.label_ids.includes(label.id) ?? false}
-                  disabled={busyMessageId !== null}
                   onCheckedChange={(checked) => {
                     if (labelTarget) void changeLabel(labelTarget, label.id, checked === true)
                   }}
