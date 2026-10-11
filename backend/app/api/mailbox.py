@@ -20,9 +20,10 @@ def api_error(exc: GmailAccessError) -> HTTPException:
 
 
 @router.get("/mailbox", response_model=Mailbox)
-async def get_mailbox(label_id: str | None = Query(default=None), q: str | None = Query(default=None)) -> Mailbox:
+async def get_mailbox(label_id: str | None = Query(default=None), q: str | None = Query(default=None),
+                      page_token: str | None = Query(default=None)) -> Mailbox:
     try:
-        return Mailbox.model_validate(await to_thread(mailbox, label_id, q))
+        return Mailbox.model_validate(await to_thread(mailbox, label_id, q, page_token))
     except GmailAccessError as exc:
         raise api_error(exc) from exc
 

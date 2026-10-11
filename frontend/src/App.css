@@ -227,7 +227,7 @@
 
 .mail-panel {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
   background: var(--bg-surface);
@@ -295,6 +295,21 @@
 .message-list {
   min-height: 0;
   height: 100%;
+}
+
+.mail-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 6px 16px;
+  border-top: 1px solid var(--border-default);
+  color: var(--text-primary);
+}
+
+.mail-pagination span {
+  min-width: 24px;
+  text-align: center;
 }
 
 .message-row {

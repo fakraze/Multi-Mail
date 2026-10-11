@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { ArrowLeft, ChevronDown, Inbox, Plus, RefreshCw, Search, Star, Tag, Trash2 } from 'lucide-react'
+import { ArrowLeft, ChevronDown, ChevronLeft, ChevronRight, Inbox, Plus, RefreshCw, Search, Star, Tag, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -53,6 +53,10 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
   const [loading, setLoading] = useState(true)
   const [messageLoading, setMessageLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
+  const [loadedPage, setLoadedPage] = useState(1)
+  const [pageTokens, setPageTokens] = useState<(string | null)[]>([null])
+  const [loadRevision, setLoadRevision] = useState(0)
 
   const visibleMessages = mailbox && accountEnabled ? mailbox.messages : []
   const highlightTerms = activeQuery ? searchHighlightTerms(activeQuery) : []
@@ -62,27 +66,27 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
   const appliedLabels = editableLabels.filter((label) => labelTarget?.label_ids.includes(label.id))
   const allSelected = visibleMessages.length > 0 && visibleMessages.every((item) => selectedIds.includes(item.id))
   const someSelected = visibleMessages.some((item) => selectedIds.includes(item.id))
+  const requestedPageToken = pageTokens[page - 1] ?? undefined
 
-  async function reload() {
+  function reload() {
     setLoading(true)
     setError(null)
-    try {
-      setMailbox(await fetchMailbox(activeQuery ? undefined : folder === 'INBOX' ? undefined : folder, undefined, activeQuery ?? undefined))
-      setMessage(null)
-      setSelectedIds([])
-    } catch (cause) {
-      setMailbox(null)
-      setError(cause instanceof Error ? cause.message : 'Could not load Gmail.')
-    } finally {
-      setLoading(false)
-    }
+    setMessage(null)
+    setSelectedIds([])
+    setPage(1)
+    setPageTokens([null])
+    setLoadRevision((current) => current + 1)
   }
 
   useEffect(() => {
     const controller = new AbortController()
-    fetchMailbox(activeQuery ? undefined : folder === 'INBOX' ? undefined : folder, controller.signal, activeQuery ?? undefined)
+    fetchMailbox(activeQuery ? undefined : folder === 'INBOX' ? undefined : folder,
+      controller.signal, activeQuery ?? undefined, requestedPageToken)
       .then((result) => {
+        if (controller.signal.aborted) return
         setMailbox(result)
+        setLoadedPage(page)
+        setError(null)
         setLoading(false)
       })
       .catch((cause: unknown) => {
@@ -91,7 +95,7 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
         setLoading(false)
       })
     return () => controller.abort()
-  }, [folder, activeQuery])
+  }, [folder, activeQuery, page, requestedPageToken, loadRevision])
 
   function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -101,11 +105,13 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
     setError(null)
     setLoading(true)
     if (query === activeQuery && (query !== null || folder === 'INBOX')) {
-      void reload()
+      reload()
       return
     }
     if (query === null) setFolder('INBOX')
     setActiveQuery(query)
+    setPage(1)
+    setPageTokens([null])
   }
 
   function selectFolder(nextFolder: string) {
@@ -118,6 +124,22 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
     setFolder(nextFolder)
     setActiveQuery(null)
     setSearchText('')
+    setMessage(null)
+    setSelectedIds([])
+    setError(null)
+    setLoading(true)
+    setPage(1)
+    setPageTokens([null])
+  }
+
+  function changePage(nextPage: number) {
+    if (loading || nextPage < 1 || nextPage > loadedPage + 1 ||
+        (nextPage > loadedPage && !mailbox?.next_page_token)) return
+    const nextToken = mailbox?.next_page_token
+    if (nextPage > loadedPage && nextToken) {
+      setPageTokens((current) => [...current.slice(0, loadedPage), nextToken])
+    }
+    setPage(nextPage)
     setMessage(null)
     setSelectedIds([])
     setError(null)
@@ -332,7 +354,7 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
             </form>
           </div>
 
-          <ScrollArea className="message-list">
+          <ScrollArea className="message-list" key={`${folder}:${activeQuery ?? ''}:${page}:${loadRevision}`}>
             {loading && <p className="empty-message" role="status">Loading Gmail mail…</p>}
             {error && <p className="empty-message error-message" role="alert">{error}</p>}
             {!loading && !mailbox && !error && (
@@ -406,6 +428,21 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
               </article>
             )}
           </ScrollArea>
+          {mailbox && accountEnabled && !message && (
+            <nav className="mail-pagination" aria-label="Mail pages">
+              <Button variant="ghost" size="icon" aria-label="Previous page"
+                disabled={loading || loadedPage === 1}
+                onClick={() => changePage(loadedPage - 1)}>
+                <ChevronLeft aria-hidden="true" size={20} />
+              </Button>
+              <span aria-current="page">{loadedPage}</span>
+              <Button variant="ghost" size="icon" aria-label="Next page"
+                disabled={loading || !mailbox.next_page_token}
+                onClick={() => changePage(loadedPage + 1)}>
+                <ChevronRight aria-hidden="true" size={20} />
+              </Button>
+            </nav>
+          )}
         </section>
       </section>
 

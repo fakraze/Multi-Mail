@@ -94,6 +94,12 @@
 - The connected page submits one free-text search field to this endpoint. Search results replace the mail list; choosing a folder clears the active search, and Refresh reruns the active query. A blank submission returns to Inbox.
 - `GET /api/messages/{message_id}` may read a search result outside INBOX as plain text. Label modifications still require INBOX, so Gmail state cannot be changed through search for a message outside INBOX.
 
+### Single-account mail pagination (08-mail-pagination)
+
+- `GET /api/mailbox` accepts an optional Gmail `page_token` alongside its existing label or search query. It requests at most 50 message references from Gmail and returns `next_page_token` (null when Gmail supplies none) with the existing account, labels, and message summaries. Invalid page tokens and Gmail API failures use controlled API errors.
+- The connected page starts at page 1 and keeps only the Gmail token for each visited page in memory. Next uses the returned token; Previous reuses the token saved for that page. Changing the folder or search and refreshing the list reset pagination to page 1. The sample mailbox is unchanged.
+- Only the current page's message details are fetched. Pagination reads Gmail state and does not modify it or persist messages or page tokens.
+
 ## Invariants
 
 1. Gmail remains the source of truth for email state

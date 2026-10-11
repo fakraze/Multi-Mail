@@ -196,9 +196,12 @@ def summary(data: dict[str, object], account: str) -> dict[str, object]:
     }
 
 
-def mailbox(requested_label: str | None = None, search_query: str | None = None) -> dict[str, object]:
+def mailbox(requested_label: str | None = None, search_query: str | None = None,
+            page_token: str | None = None) -> dict[str, object]:
     if search_query is not None and (not search_query.strip() or requested_label is not None):
         raise GmailAccessError("Invalid mailbox search.")
+    if page_token is not None and (not page_token.strip() or len(page_token) > 4096):
+        raise GmailAccessError("Invalid page token.")
     client = GmailClient()
     account = client.profile_address()
     label_response = client.get_json(LABELS_URL)
@@ -219,7 +222,9 @@ def mailbox(requested_label: str | None = None, search_query: str | None = None)
     labels.sort(key=lambda item: str(item["name"]).casefold())
     if requested_label is not None and requested_label != "STARRED" and requested_label not in {label["id"] for label in labels}:
         raise GmailAccessError("Invalid mailbox label.")
-    query = [("maxResults", "20")]
+    query = [("maxResults", "50")]
+    if page_token is not None:
+        query.append(("pageToken", page_token))
     if search_query is not None:
         query.append(("q", search_query))
     else:
@@ -228,8 +233,13 @@ def mailbox(requested_label: str | None = None, search_query: str | None = None)
             query.append(("labelIds", requested_label))
     url = GMAIL_URL + "?" + urlencode(query)
     listing = client.get_json(url)
+    next_page_token = listing.get("nextPageToken")
+    if next_page_token is not None and (not isinstance(next_page_token, str) or not next_page_token.strip() or len(next_page_token) > 4096):
+        raise GmailAccessError("Gmail returned an invalid page token.")
     references = listing.get("messages", [])
     if not isinstance(references, list):
+        raise GmailAccessError("Gmail returned an invalid inbox.")
+    if len(references) > 50:
         raise GmailAccessError("Gmail returned an invalid inbox.")
     message_ids: list[str] = []
     for reference in references:
@@ -245,7 +255,7 @@ def mailbox(requested_label: str | None = None, search_query: str | None = None)
     with ThreadPoolExecutor(max_workers=5) as executor:
         messages = list(executor.map(fetch_summary, message_ids))
     messages.sort(key=lambda item: str(item["received_at"]), reverse=True)
-    return {"account": account, "labels": labels, "messages": messages}
+    return {"account": account, "labels": labels, "messages": messages, "next_page_token": next_page_token}
 
 
 def read_message(message_id: str) -> dict[str, object]:

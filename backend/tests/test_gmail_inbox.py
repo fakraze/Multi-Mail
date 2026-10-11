@@ -2,6 +2,7 @@ import base64
 import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
+from urllib.parse import parse_qs, urlparse
 
 from app.services.gmail_access import GmailAccessError
 from app.services.gmail_inbox import GmailClient, body_text, mailbox, read_message, sender_name
@@ -67,7 +68,7 @@ class GmailInboxTests(unittest.TestCase):
                 if url.endswith("/labels") else {"messages": []}
             )
             self.assertEqual(mailbox("STARRED")["messages"], [])
-            self.assertIn("labelIds=INBOX&maxResults=20&labelIds=STARRED", client.get_json.call_args.args[0])
+            self.assertIn("labelIds=INBOX&maxResults=50&labelIds=STARRED", client.get_json.call_args.args[0])
             self.assertEqual(mailbox("Label_1")["messages"], [])
             self.assertIn("labelIds=Label_1", client.get_json.call_args.args[0])
             with self.assertRaisesRegex(GmailAccessError, "Invalid mailbox label"):
@@ -93,6 +94,38 @@ class GmailInboxTests(unittest.TestCase):
             mailbox(search_query=" ")
         with self.assertRaisesRegex(GmailAccessError, "Invalid mailbox search"):
             mailbox("STARRED", "hello")
+
+    def test_mailbox_forwards_page_token_and_returns_next_token(self) -> None:
+        with patch("app.services.gmail_inbox.GmailClient") as client_class:
+            client = client_class.return_value
+            client.profile_address.return_value = "me@example.com"
+            client.get_json.side_effect = lambda url: (
+                {"labels": []} if url.endswith("/labels") else
+                {"messages": [], "nextPageToken": "later_token"}
+            )
+            result = mailbox(search_query="from:alice", page_token="earlier/token=")
+        self.assertEqual(result["next_page_token"], "later_token")
+        query = parse_qs(urlparse(client.get_json.call_args.args[0]).query)
+        self.assertEqual(query, {"maxResults": ["50"], "pageToken": ["earlier/token="], "q": ["from:alice"]})
+
+    def test_mailbox_rejects_invalid_page_data(self) -> None:
+        with self.assertRaisesRegex(GmailAccessError, "Invalid page token"):
+            mailbox(page_token=" ")
+        with patch("app.services.gmail_inbox.GmailClient") as client_class:
+            client = client_class.return_value
+            client.profile_address.return_value = "me@example.com"
+            client.get_json.side_effect = lambda url: (
+                {"labels": []} if url.endswith("/labels") else
+                {"messages": [], "nextPageToken": 123}
+            )
+            with self.assertRaisesRegex(GmailAccessError, "invalid page token"):
+                mailbox()
+            client.get_json.side_effect = lambda url: (
+                {"labels": []} if url.endswith("/labels") else
+                {"messages": [{"id": str(index)} for index in range(51)]}
+            )
+            with self.assertRaisesRegex(GmailAccessError, "invalid inbox"):
+                mailbox()
 
     def test_sender_uses_display_name_without_quotes_or_address(self) -> None:
         self.assertEqual(

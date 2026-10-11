@@ -4,11 +4,11 @@ Update this file after every meaningful implementation change.
 
 ## Current Phase
 
-- 07 Gmail search complete
+- 08 Mail pagination complete
 
 ## Current Goal
 
-- Implement 08-mail-pagination next; multi-account aggregation remains a later phase.
+- Choose the next feature unit from Next Up; multi-account aggregation remains a later phase.
 
 ## Completed
 
@@ -32,6 +32,10 @@ Update this file after every meaningful implementation change.
 
 **07-gmail-search:** Added single-account Gmail search through the existing backend mailbox API. The connected page displays up to 20 matching messages, supports Gmail query syntax, and highlights visible search terms in yellow in sender, subject, and preview. Search remains read-only and does not persist results. A live query, 35 backend tests, three highlight tests, frontend lint, and production build passed.
 
+**08-mail-pagination:** The mailbox API loads at most 50 Gmail messages per page and returns Gmail's next-page token. The connected page shows previous/current/next controls, remembers tokens for visited pages, and resets to page 1 after search, folder, or refresh changes. Message rows and actions remain available. All 37 backend tests, frontend lint, and production build passed.
+
+**Mail loading sidebar fix:** Refreshing, searching, or changing folders now keeps the last loaded mailbox metadata visible, so Important, user labels, and account controls remain in place while the message list loads. Frontend lint and production build passed.
+
 **Home title navigation:** The Multi Mail title is a keyboard-accessible button in both sample and connected mail views. It returns to that view's Inbox, clears the active search or opened message as applicable, and preserves the connected Gmail view. Frontend lint and production build passed.
 
 ## In Progress
@@ -40,7 +44,7 @@ Update this file after every meaningful implementation change.
 
 ## Next Up
 
-- 08-mail-pagination (specified, not started): browse Gmail messages in pages of up to 50.
+- database storage for persistent multiple-account tokens and faster mail access
 - background process, update speed (save mail in DB but sync every user refresh and every miniute)
     First connection
         → Full sync
@@ -48,7 +52,6 @@ Update this file after every meaningful implementation change.
         → Incremental sync
     If incremental sync fails
         → Full sync fallback
-- database for store multiple account token (token still persist after restart)
 - connect multiple accounts
 - disconnect account
 - account selection
@@ -63,8 +66,8 @@ Update this file after every meaningful implementation change.
 ## Architecture Decisions
 
 - Frontend UI primitives live under `frontend/src/components/ui/` and use token-backed Tailwind classes with `frontend/src/lib/utils.ts` for class merging.
-- The local OAuth route contract, latest-grant file storage, backend-only Gmail profile check, live single-account inbox, search and modification APIs, and backend-only Gmail modification command are documented in `architecture.md`. No database model was added.
+- The local OAuth route contract, latest-grant file storage, backend-only Gmail profile check, live single-account inbox, search, pagination and modification APIs, and backend-only Gmail modification command are documented in `architecture.md`. No database model was added.
 
 ## Session Notes
 
-- The React app starts on the original sample mail page. Connect Gmail opens the login page, whose Back button returns to the originating sample or live mail view; Continue with Google navigates to the local FastAPI OAuth start route. On authorization success, the callback redirects home with `gmail=connected` and the frontend loads the latest grant's real Gmail inbox. Direct visits to `/` stay on the sample page even when a token file exists. The connected page filters INBOX mail by Starred or sidebar labels, supports star and displayed label changes in rows and opened messages, can create or delete Gmail user labels, and searches the latest connected account. The Multi Mail title returns the current mail view to Inbox. Multi-account storage and disconnect are not yet connected. Direct Uvicorn runs use `--no-access-log` so callback authorization codes are not written to request logs.
+- The React app starts on the original sample mail page. Connect Gmail opens the login page, whose Back button returns to the originating sample or live mail view; Continue with Google navigates to the local FastAPI OAuth start route. On authorization success, the callback redirects home with `gmail=connected` and the frontend loads the latest grant's real Gmail inbox. Direct visits to `/` stay on the sample page even when a token file exists. The connected page filters INBOX mail by Starred or sidebar labels, supports star and displayed label changes in rows and opened messages, can create or delete Gmail user labels, searches the latest connected account, and paginates up to 50 messages at a time. While mail reloads, the sidebar retains Important, user labels, and account controls. The Multi Mail title returns the current mail view to Inbox. Multi-account storage and disconnect are not yet connected. Direct Uvicorn runs use `--no-access-log` so callback authorization codes are not written to request logs.

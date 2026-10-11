@@ -39,20 +39,23 @@ async function request(path: string, signal?: AbortSignal, body?: object, method
   return data
 }
 
-export async function fetchMailbox(labelId?: string, signal?: AbortSignal, searchQuery?: string): Promise<Mailbox> {
-  const path = searchQuery !== undefined
-    ? `/api/mailbox?q=${encodeURIComponent(searchQuery)}`
-    : labelId ? `/api/mailbox?label_id=${encodeURIComponent(labelId)}` : '/api/mailbox'
+export async function fetchMailbox(labelId?: string, signal?: AbortSignal, searchQuery?: string, pageToken?: string): Promise<Mailbox> {
+  const params = new URLSearchParams()
+  if (searchQuery !== undefined) params.set('q', searchQuery)
+  else if (labelId) params.set('label_id', labelId)
+  if (pageToken !== undefined) params.set('page_token', pageToken)
+  const path = `/api/mailbox${params.size ? `?${params.toString()}` : ''}`
   const data = await request(path, signal)
   if (!isRecord(data) || typeof data.account !== 'string' ||
     !Array.isArray(data.labels) || !data.labels.every((label: unknown) =>
       isRecord(label) && typeof label.id === 'string' && typeof label.name === 'string' &&
       (label.kind === 'user' || label.kind === 'system') &&
       typeof label.modifiable === 'boolean' && typeof label.deletable === 'boolean') ||
-    !Array.isArray(data.messages) || !data.messages.every(isMessage)) {
+    !Array.isArray(data.messages) || data.messages.length > 50 || !data.messages.every(isMessage) ||
+    !(data.next_page_token === null || (typeof data.next_page_token === 'string' && data.next_page_token.length > 0))) {
     throw new Error('The mail backend returned invalid inbox data.')
   }
-  return { account: data.account, labels: data.labels, messages: data.messages }
+  return { account: data.account, labels: data.labels, messages: data.messages, next_page_token: data.next_page_token }
 }
 
 export async function fetchMessage(messageId: string, signal?: AbortSignal): Promise<MessageDetail> {

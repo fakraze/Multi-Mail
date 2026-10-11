@@ -21,6 +21,7 @@ export type Mailbox = {
   account: string
   labels: MailLabel[]
   messages: MailMessage[]
+  next_page_token: string | null
 }
 
 export type MessageDetail = MailMessage & { body: string }

@@ -31,6 +31,7 @@ class Mailbox(BaseModel):
     account: str
     labels: list[MailLabel]
     messages: list[MessageSummary]
+    next_page_token: str | None = None
 
 
 class MessageDetail(MessageSummary):
