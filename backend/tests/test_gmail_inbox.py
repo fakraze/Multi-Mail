@@ -26,13 +26,17 @@ class GmailInboxTests(unittest.TestCase):
                 {"labels": [
                     {"id": "Label_1", "name": "Work", "type": "user"},
                     {"id": "CATEGORY_UPDATES", "name": "CATEGORY_UPDATES", "type": "system"},
+                    {"id": "IMPORTANT", "name": "IMPORTANT", "type": "system"},
                     {"id": "INBOX", "name": "Inbox", "type": "system"},
                 ]}
                 if url.endswith("/labels") else listing if "?labelIds=" in url else first if "/abc?" in url else second
             )
             result = mailbox()
         self.assertEqual(result["account"], "me@example.com")
-        self.assertEqual(result["labels"], [{"id": "CATEGORY_UPDATES", "name": "Updates"}, {"id": "Label_1", "name": "Work"}])
+        self.assertEqual(result["labels"], [
+            {"id": "IMPORTANT", "name": "Important", "kind": "system", "modifiable": True, "deletable": False},
+            {"id": "Label_1", "name": "Work", "kind": "user", "modifiable": True, "deletable": True},
+        ])
         self.assertEqual([item["id"] for item in result["messages"]], ["def", "abc"])
         self.assertEqual(result["messages"][0]["account"], "me@example.com")
         self.assertEqual(result["messages"][0]["sender"], "Bob")
@@ -54,6 +58,25 @@ class GmailInboxTests(unittest.TestCase):
             with self.assertRaisesRegex(GmailAccessError, "not in the inbox"):
                 read_message("abc")
         self.assertEqual(body_text({"mimeType": "text/html", "body": {"data": base64.urlsafe_b64encode(b"<p>Hi<script>bad()</script> there</p>").decode("ascii")}}), "Hi there")
+
+    def test_mailbox_filters_inbox_by_gmail_label(self) -> None:
+        with patch("app.services.gmail_inbox.GmailClient") as client_class:
+            client = client_class.return_value
+            client.profile_address.return_value = "me@example.com"
+            client.get_json.side_effect = lambda url: (
+                {"labels": [{"id": "Label_1", "name": "Work", "type": "user"}]}
+                if url.endswith("/labels") else {"messages": []}
+            )
+            self.assertEqual(mailbox("STARRED")["messages"], [])
+            self.assertIn("labelIds=INBOX&maxResults=20&labelIds=STARRED", client.get_json.call_args.args[0])
+            self.assertEqual(mailbox("Label_1")["messages"], [])
+            self.assertIn("labelIds=Label_1", client.get_json.call_args.args[0])
+            with self.assertRaisesRegex(GmailAccessError, "Invalid mailbox label"):
+                mailbox("PURCHASES")
+            with self.assertRaisesRegex(GmailAccessError, "Invalid mailbox label"):
+                mailbox("CATEGORY_PERSONAL")
+            with self.assertRaisesRegex(GmailAccessError, "Invalid mailbox label"):
+                mailbox("UNREAD")
 
     def test_sender_uses_display_name_without_quotes_or_address(self) -> None:
         self.assertEqual(

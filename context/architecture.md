@@ -54,6 +54,40 @@
 - Both endpoints read the latest local grant and may refresh an expired access token in memory. Gmail content and refreshed access tokens are not persisted. This phase remains a single-account local flow; the latest OAuth grant replaces the previous account.
 - Local development allows the configured frontend origin to call the backend API. The frontend origin is a fixed loopback URL from backend configuration, never a redirect target supplied by a request.
 
+### Backend Gmail state modification (06-gmail-modify)
+
+- A backend-only command accepts one explicit Gmail message ID and one action: star, unstar, add-label, or remove-label. Label actions additionally require an ID for a user label, Important, or a displayed Gmail category; the command checks it against the authorized account's labels. Other system labels remain unavailable to avoid changing read/unread or unrelated mailbox state.
+- The command reads `backend/oauth_tokens.json`, uses the latest grant for that account, refreshes an expired access token in memory if possible, and calls Gmail `users.messages.modify` with only the requested label change. It reads the same message again and reports success only when that message ID and label state match the request.
+- Gmail remains the sole store of message state. No modification route or frontend action contract is introduced in this backend verification unit.
+
+### Connected-page Gmail actions and filters (06b-gmail-modify-ui)
+
+- `GET /api/mailbox?label_id=...` returns up to 20 newest INBOX messages that also have the requested Gmail label. Omit `label_id` for Inbox; use `STARRED` for Starred, or an ID from the returned sidebar labels. The response includes each message's `label_ids` and each sidebar label's `modifiable` and `deletable` flags. Displayed user and category labels and Important are modifiable; only user labels are deletable.
+- `PATCH /api/messages/{message_id}/labels` accepts `{account, label_id, present}`. The backend verifies the latest authorized Gmail account matches `account`, checks that the message is still in INBOX, permits `STARRED`, user labels, Important, or displayed categories, calls Gmail modify for only that label, and reads the same message back. It returns `{id, account, label_ids, starred}` only after confirmation. Errors are returned without tokens or message content.
+- The connected frontend uses this route for star and label checkboxes, and reads the Gmail-filtered mailbox when Inbox, Starred, or a sidebar label is selected. Only the latest single-account grant is supported; the sample page remains local sample data.
+
+### Connected-page label creation and category editing (06c-gmail-labels)
+
+- All labels displayed in the live sidebar are editable on an INBOX message: Gmail user labels, Important, and the five Gmail category labels. The backend still rejects system labels that would change read/unread, archive, spam, trash, sent, or draft state.
+- `POST /api/labels` accepts `{account, name}`. The backend checks the latest authorized account, creates a Gmail user label with `users.labels.create`, reads the label list again to verify the new ID and name, and returns `{id, name, kind: user, modifiable: true, deletable: true}`. The frontend adds it to the sidebar and message label picker. Gmail remains the only store; the application database is unchanged.
+
+### Connected-page label deletion (06d-gmail-label-delete)
+
+- Mailbox label entries expose `deletable: true` only for Gmail user labels. The live sidebar shows a delete button only for those entries and asks for confirmation that the label will be removed from Gmail messages; deleting a label does not delete messages.
+- `DELETE /api/labels/{label_id}?account=...` checks the latest authorized account and verifies that the requested ID is a user label before calling Gmail `users.labels.delete`. It reads the Gmail label list again and reports success only when that ID is absent. The frontend removes the deleted label from its sidebar and local message state, and returns to Inbox if that label was the active filter.
+
+### Gmail category navigation and Purchases view (06e-gmail-categories)
+
+- Gmail `CATEGORY_PERSONAL` is the built-in Primary classification label. The category names shown by the app are in English. The Categories sidebar shows five entries: Purchases, Social, Updates, Forums, and Promotions; it omits Primary. Gmail's five `CATEGORY_*` labels remain available in the API and message label picker for filtering or manual application where applicable. Important remains a separate system marker. User-created labels appear in their own sidebar group.
+- Gmail Purchases is a view without a label ID in `users.labels.list`. The mailbox response adds a virtual `PURCHASES` entry with `kind: view`, `modifiable: false`, and `deletable: false`. `GET /api/mailbox?label_id=PURCHASES` queries Gmail `users.messages.list` with `labelIds=INBOX` and `q=category:purchases`; it returns the same message summary format and up to 20 matches. This virtual entry cannot be sent to the label modify or delete routes.
+- Each mailbox label entry exposes `kind: user | system | view`. The connected sidebar uses this to group categories, Important, and user labels without treating Purchases as a Gmail label. It filters `CATEGORY_PERSONAL` from the Categories group so the group has exactly five visible entries when Gmail returns the four other category labels. The message label picker includes only modifiable entries.
+
+### Labels and Important only (06g-labels-only)
+
+- The current connected mailbox exposes only Gmail user-created labels and the Important system label as selectable labels. The sidebar contains Inbox, Starred, Important, and user Labels; there is no Categories group or Purchases view. Gmail category IDs may still exist on messages as Gmail state, but they are not presented as app labels.
+- `GET /api/mailbox` returns only user labels and Important in its `labels` array. A `label_id` filter accepts `STARRED`, `IMPORTANT`, or a returned user label ID. Category and Purchases filters are invalid. `PATCH /api/messages/{message_id}/labels` accepts star changes, Important, or user label IDs; it rejects category IDs. The backend-only modify command follows the same label rule.
+- The message label dialog lists Important and user labels only. When none of those are applied to a message, it says `No labels applied.` even if Gmail reports a category such as `CATEGORY_PERSONAL`. Its checkboxes still let the user add Important or a user label.
+
 ## Invariants
 
 1. Gmail remains the source of truth for email state

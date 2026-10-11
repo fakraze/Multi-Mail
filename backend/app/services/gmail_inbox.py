@@ -26,11 +26,6 @@ GMAIL_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages"
 LABELS_URL = "https://gmail.googleapis.com/gmail/v1/users/me/labels"
 DISPLAY_SYSTEM_LABELS = {
     "IMPORTANT": "Important",
-    "CATEGORY_PERSONAL": "Primary",
-    "CATEGORY_SOCIAL": "Social",
-    "CATEGORY_PROMOTIONS": "Promotions",
-    "CATEGORY_UPDATES": "Updates",
-    "CATEGORY_FORUMS": "Forums",
 }
 MESSAGE_ID = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -133,13 +128,22 @@ class GmailClient:
             self.refresh()
             return get_profile(self.access_token).email_address
 
-    def get_json(self, url: str) -> dict[str, object]:
+    def request_json(self, url: str, body: dict[str, object] | None = None, method: str | None = None) -> dict[str, object]:
         for attempt in range(2):
             token = self.access_token
-            request = Request(url, headers={"Authorization": f"Bearer {token}"})
+            headers = {"Authorization": f"Bearer {token}"}
+            if body is not None:
+                headers["Content-Type"] = "application/json"
+            request = Request(
+                url,
+                data=json.dumps(body).encode("utf-8") if body is not None else None,
+                headers=headers,
+                method=method or ("POST" if body is not None else "GET"),
+            )
             try:
                 with urlopen(request, timeout=10) as response:
-                    data = json.load(response)
+                    payload = response.read()
+                    data = json.loads(payload) if payload else {}
             except HTTPError as exc:
                 if exc.code == 401 and attempt == 0:
                     with self.refresh_lock:
@@ -152,11 +156,20 @@ class GmailClient:
                     raise GmailAccessError("Gmail access was denied. Check Gmail API access.") from exc
                 raise GmailAccessError(f"Gmail API request failed (HTTP {exc.code}).") from exc
             except (URLError, TimeoutError, OSError, ValueError) as exc:
-                raise GmailAccessError("Could not retrieve Gmail messages.") from exc
+                raise GmailAccessError("Could not contact Gmail.") from exc
             if not isinstance(data, dict):
                 raise GmailAccessError("Gmail returned an invalid response.")
             return data
-        raise GmailAccessError("Could not retrieve Gmail messages.")
+        raise GmailAccessError("Could not contact Gmail.")
+
+    def get_json(self, url: str) -> dict[str, object]:
+        return self.request_json(url)
+
+    def post_json(self, url: str, body: dict[str, object]) -> dict[str, object]:
+        return self.request_json(url, body)
+
+    def delete_json(self, url: str) -> dict[str, object]:
+        return self.request_json(url, method="DELETE")
 
 
 def summary(data: dict[str, object], account: str) -> dict[str, object]:
@@ -179,17 +192,18 @@ def summary(data: dict[str, object], account: str) -> dict[str, object]:
         "snippet": snippet if isinstance(snippet, str) else "",
         "received_at": received_at,
         "starred": "STARRED" in label_ids,
+        "label_ids": label_ids,
     }
 
 
-def mailbox() -> dict[str, object]:
+def mailbox(requested_label: str | None = None) -> dict[str, object]:
     client = GmailClient()
     account = client.profile_address()
     label_response = client.get_json(LABELS_URL)
     raw_labels = label_response.get("labels", [])
     if not isinstance(raw_labels, list):
         raise GmailAccessError("Gmail returned invalid labels.")
-    labels: list[dict[str, str]] = []
+    labels: list[dict[str, object]] = []
     for label in raw_labels:
         if not isinstance(label, dict):
             raise GmailAccessError("Gmail returned invalid labels.")
@@ -197,11 +211,16 @@ def mailbox() -> dict[str, object]:
         if not isinstance(label_id, str) or not isinstance(name, str):
             continue
         if label.get("type") == "user":
-            labels.append({"id": label_id, "name": name})
+            labels.append({"id": label_id, "name": name, "kind": "user", "modifiable": True, "deletable": True})
         elif label_id in DISPLAY_SYSTEM_LABELS:
-            labels.append({"id": label_id, "name": DISPLAY_SYSTEM_LABELS[label_id]})
-    labels.sort(key=lambda item: item["name"].casefold())
-    url = GMAIL_URL + "?" + urlencode({"labelIds": "INBOX", "maxResults": 20})
+            labels.append({"id": label_id, "name": DISPLAY_SYSTEM_LABELS[label_id], "kind": "system", "modifiable": True, "deletable": False})
+    labels.sort(key=lambda item: str(item["name"]).casefold())
+    if requested_label is not None and requested_label != "STARRED" and requested_label not in {label["id"] for label in labels}:
+        raise GmailAccessError("Invalid mailbox label.")
+    query = [("labelIds", "INBOX"), ("maxResults", "20")]
+    if requested_label is not None:
+        query.append(("labelIds", requested_label))
+    url = GMAIL_URL + "?" + urlencode(query)
     listing = client.get_json(url)
     references = listing.get("messages", [])
     if not isinstance(references, list):

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { ArrowLeft, ChevronDown, Inbox, RefreshCw, Search, Star, Tag } from 'lucide-react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { ArrowLeft, ChevronDown, Inbox, Plus, RefreshCw, Search, Star, Tag, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -7,8 +7,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
-import { fetchMailbox, fetchMessage } from '@/services/mailbox'
-import type { Mailbox, MessageDetail } from '@/types/mail'
+import { createGmailLabel, deleteGmailLabel, fetchMailbox, fetchMessage, setMessageLabel } from '@/services/mailbox'
+import type { Mailbox, MailLabel, MailMessage, MessageDetail } from '@/types/mail'
 
 import '../App.css'
 
@@ -31,6 +31,17 @@ function formatListTime(value: string): string {
 function MainMailPage({ onConnect }: { onConnect: () => void }) {
   const [mailbox, setMailbox] = useState<Mailbox | null>(null)
   const [message, setMessage] = useState<MessageDetail | null>(null)
+  const [folder, setFolder] = useState('INBOX')
+  const folderRef = useRef(folder)
+  const [labelTarget, setLabelTarget] = useState<MailMessage | null>(null)
+  const [createLabelOpen, setCreateLabelOpen] = useState(false)
+  const [newLabelName, setNewLabelName] = useState('')
+  const [createLabelError, setCreateLabelError] = useState<string | null>(null)
+  const [creatingLabel, setCreatingLabel] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<MailLabel | null>(null)
+  const [deletingLabel, setDeletingLabel] = useState(false)
+  const [deleteLabelError, setDeleteLabelError] = useState<string | null>(null)
+  const [busyMessageId, setBusyMessageId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [accountEnabled, setAccountEnabled] = useState(true)
   const [labelsExpanded, setLabelsExpanded] = useState(false)
@@ -40,6 +51,10 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
   const [error, setError] = useState<string | null>(null)
 
   const visibleMessages = mailbox && accountEnabled ? mailbox.messages : []
+  const userLabels = mailbox?.labels.filter((label) => label.kind === 'user') ?? []
+  const important = mailbox?.labels.find((label) => label.id === 'IMPORTANT')
+  const editableLabels = mailbox?.labels.filter((label) => label.modifiable) ?? []
+  const appliedLabels = editableLabels.filter((label) => labelTarget?.label_ids.includes(label.id))
   const allSelected = visibleMessages.length > 0 && visibleMessages.every((item) => selectedIds.includes(item.id))
   const someSelected = visibleMessages.some((item) => selectedIds.includes(item.id))
 
@@ -47,7 +62,7 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
     setLoading(true)
     setError(null)
     try {
-      setMailbox(await fetchMailbox())
+      setMailbox(await fetchMailbox(folder === 'INBOX' ? undefined : folder))
       setMessage(null)
       setSelectedIds([])
     } catch (cause) {
@@ -60,7 +75,7 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
 
   useEffect(() => {
     const controller = new AbortController()
-    fetchMailbox(controller.signal)
+    fetchMailbox(folder === 'INBOX' ? undefined : folder, controller.signal)
       .then((result) => {
         setMailbox(result)
         setLoading(false)
@@ -71,7 +86,91 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
         setLoading(false)
       })
     return () => controller.abort()
-  }, [])
+  }, [folder])
+
+  function selectFolder(nextFolder: string) {
+    if (nextFolder === folder) {
+      setMessage(null)
+      return
+    }
+    folderRef.current = nextFolder
+    setFolder(nextFolder)
+    setMessage(null)
+    setSelectedIds([])
+    setError(null)
+    setLoading(true)
+  }
+
+  async function changeLabel(item: MailMessage, labelId: string, present: boolean) {
+    if (busyMessageId) return
+    setBusyMessageId(item.id)
+    setError(null)
+    try {
+      const result = await setMessageLabel(item.id, item.account, labelId, present)
+      if (folderRef.current !== folder) return
+      const update = <T extends MailMessage>(mail: T): T => mail.id === item.id
+        ? { ...mail, label_ids: result.label_ids, starred: result.starred }
+        : mail
+      setMailbox((current) => current && {
+        ...current,
+        messages: current.messages.map(update).filter((mail) =>
+          folder === 'INBOX' || mail.label_ids.includes(folder)),
+      })
+      setMessage((current) => current ? update(current) : null)
+      setLabelTarget((current) => current ? update(current) : null)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not change the Gmail label.')
+    } finally {
+      setBusyMessageId(null)
+    }
+  }
+
+  async function submitNewLabel(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!mailbox || creatingLabel || !newLabelName.trim()) return
+    setCreatingLabel(true)
+    setCreateLabelError(null)
+    try {
+      const label = await createGmailLabel(mailbox.account, newLabelName.trim())
+      setMailbox((current) => current && {
+        ...current,
+        labels: [...current.labels, label].sort((a, b) => a.name.localeCompare(b.name)),
+      })
+      setLabelsExpanded(true)
+      setCreateLabelOpen(false)
+      setNewLabelName('')
+    } catch (cause) {
+      setCreateLabelError(cause instanceof Error ? cause.message : 'Could not create the Gmail label.')
+    } finally {
+      setCreatingLabel(false)
+    }
+  }
+
+  async function confirmDeleteLabel() {
+    if (!mailbox || !deleteTarget || deletingLabel) return
+    setDeletingLabel(true)
+    setDeleteLabelError(null)
+    try {
+      await deleteGmailLabel(mailbox.account, deleteTarget.id)
+      const deletedId = deleteTarget.id
+      setMailbox((current) => current && {
+        ...current,
+        labels: current.labels.filter((label) => label.id !== deletedId),
+        messages: current.messages.map((mail) => ({
+          ...mail, label_ids: mail.label_ids.filter((id) => id !== deletedId),
+        })),
+      })
+      setMessage((current) => current && {
+        ...current, label_ids: current.label_ids.filter((id) => id !== deletedId),
+      })
+      if (folderRef.current === deletedId) selectFolder('INBOX')
+      setDeleteTarget(null)
+    } catch (cause) {
+      setDeleteLabelError(cause instanceof Error ? cause.message : 'Could not delete the Gmail label.')
+    } finally {
+      setDeletingLabel(false)
+    }
+  }
 
   async function openMessage(messageId: string) {
     setMessageLoading(true)
@@ -92,36 +191,58 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
           <h1>Multi Mail</h1>
           <Button className="connect-button" onClick={onConnect}>Connect Gmail</Button>
           <nav className="mail-navigation" aria-label="Mail folders">
-            <button type="button" className="navigation-item" aria-current="page" onClick={() => setMessage(null)}>
+            <button type="button" className="navigation-item" aria-current={folder === 'INBOX' ? 'page' : undefined} onClick={() => selectFolder('INBOX')}>
               <Inbox aria-hidden="true" size={20} /> Inbox
             </button>
-            <button type="button" className="navigation-item" onClick={() => setNotice('Starred mail')}>
+            <button type="button" className="navigation-item" aria-current={folder === 'STARRED' ? 'page' : undefined} onClick={() => selectFolder('STARRED')}>
               <Star aria-hidden="true" size={20} /> Starred
             </button>
-            <button
-              type="button"
-              className="navigation-item"
-              aria-expanded={labelsExpanded}
-              aria-controls="mail-labels"
-              onClick={() => setLabelsExpanded((expanded) => !expanded)}
-            >
-              <Tag aria-hidden="true" size={20} /> Labels
-              <ChevronDown className="navigation-chevron" aria-hidden="true" size={16} />
-            </button>
+            {important && (
+              <button type="button" className="navigation-item" aria-current={folder === 'IMPORTANT' ? 'page' : undefined}
+                onClick={() => selectFolder('IMPORTANT')}>
+                <Tag aria-hidden="true" size={20} /> Important
+              </button>
+            )}
+            <div className="label-navigation-heading">
+              <button
+                type="button"
+                className="navigation-item"
+                aria-expanded={labelsExpanded}
+                aria-controls="mail-labels"
+                onClick={() => setLabelsExpanded((expanded) => !expanded)}
+              >
+                <Tag aria-hidden="true" size={20} /> Labels
+                <ChevronDown className="navigation-chevron" aria-hidden="true" size={16} />
+              </button>
+              <Button variant="ghost" size="icon" className="label-create-button"
+                aria-label="Create Gmail label" disabled={!mailbox}
+                onClick={() => { setNewLabelName(''); setCreateLabelError(null); setCreateLabelOpen(true) }}>
+                <Plus aria-hidden="true" size={16} />
+              </Button>
+            </div>
             {labelsExpanded && (
               <div className="label-navigation" id="mail-labels">
-                {mailbox?.labels.map((label) => (
-                  <button
-                    type="button"
-                    className="navigation-item label-item"
-                    key={label.id}
-                    title={label.name}
-                    onClick={() => setNotice(`Label: ${label.name}`)}
-                  >
-                    <span className="label-name">{label.name}</span>
-                  </button>
+                {userLabels.map((label) => (
+                  <div className="label-row" key={label.id}>
+                    <button
+                      type="button"
+                      className="navigation-item label-item"
+                      title={label.name}
+                      aria-current={folder === label.id ? 'page' : undefined}
+                      onClick={() => selectFolder(label.id)}
+                    >
+                      <span className="label-name">{label.name}</span>
+                    </button>
+                    {label.deletable && (
+                      <Button variant="ghost" size="icon" className="label-delete-button"
+                        aria-label={`Delete label ${label.name}`}
+                        onClick={() => { setDeleteLabelError(null); setDeleteTarget(label) }}>
+                        <Trash2 aria-hidden="true" size={16} />
+                      </Button>
+                    )}
+                  </div>
                 ))}
-                {mailbox && mailbox.labels.length === 0 && <span className="label-empty">No Gmail labels</span>}
+                {mailbox && userLabels.length === 0 && <span className="label-empty">No custom labels</span>}
               </div>
             )}
           </nav>
@@ -187,13 +308,13 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
           </div>
 
           <ScrollArea className="message-list">
-            {loading && <p className="empty-message" role="status">Loading Gmail inbox…</p>}
+            {loading && <p className="empty-message" role="status">Loading Gmail mail…</p>}
             {error && <p className="empty-message error-message" role="alert">{error}</p>}
             {!loading && !mailbox && (
               <div className="empty-message"><p>Connect Gmail to see your inbox.</p><Button onClick={onConnect}>Connect Gmail</Button></div>
             )}
             {!loading && mailbox && !message && visibleMessages.length === 0 && (
-              <p className="empty-message">{accountEnabled ? 'This Gmail inbox is empty.' : 'Select the account to show its mail.'}</p>
+              <p className="empty-message">{accountEnabled ? 'No messages in this view.' : 'Select the account to show its mail.'}</p>
             )}
             {!loading && !message && visibleMessages.map((item) => (
               <div className="message-row live-message-row" key={item.id}>
@@ -210,7 +331,8 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
                     size="icon"
                     className={item.starred ? 'marked-action' : undefined}
                     aria-label={`${item.starred ? 'Unstar' : 'Star'} ${item.subject}`}
-                    onClick={() => setNotice(`${item.starred ? 'Unstar' : 'Star'} ${item.subject}`)}
+                    disabled={busyMessageId !== null}
+                    onClick={() => void changeLabel(item, 'STARRED', !item.starred)}
                   >
                     <Star aria-hidden="true" size={16} fill={item.starred ? 'currentColor' : 'none'} />
                   </Button>
@@ -218,7 +340,8 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
                     variant="ghost"
                     size="icon"
                     aria-label={`Labels for ${item.subject}`}
-                    onClick={() => setNotice(`Labels for ${item.subject}`)}
+                    disabled={busyMessageId !== null}
+                    onClick={() => setLabelTarget(item)}
                   >
                     <Tag aria-hidden="true" size={16} />
                   </Button>
@@ -238,6 +361,17 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
             {message && !messageLoading && (
               <article className="message-detail">
                 <h2>{message.subject}</h2>
+                <div className="detail-actions">
+                  <Button variant="ghost" size="sm" disabled={busyMessageId !== null}
+                    onClick={() => void changeLabel(message, 'STARRED', !message.starred)}>
+                    <Star aria-hidden="true" size={16} fill={message.starred ? 'currentColor' : 'none'} />
+                    {message.starred ? 'Unstar' : 'Star'}
+                  </Button>
+                  <Button variant="ghost" size="sm" disabled={busyMessageId !== null}
+                    onClick={() => setLabelTarget(message)}>
+                    <Tag aria-hidden="true" size={16} /> Labels
+                  </Button>
+                </div>
                 <p className="message-meta">From: {message.sender}</p>
                 <p className="message-meta">Account: {message.account}</p>
                 <time className="message-meta" dateTime={message.received_at}>{formatTime(message.received_at)}</time>
@@ -254,6 +388,65 @@ function MainMailPage({ onConnect }: { onConnect: () => void }) {
             <DialogTitle>{notice}</DialogTitle>
             <DialogDescription>This action is not connected to Gmail yet. No Gmail data was changed.</DialogDescription>
           </DialogHeader>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={labelTarget !== null} onOpenChange={(open) => !open && setLabelTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Labels for {labelTarget?.subject}</DialogTitle>
+            <DialogDescription>Select labels to add or remove in Gmail.</DialogDescription>
+          </DialogHeader>
+          {error && <p className="error-message" role="alert">{error}</p>}
+          {labelTarget && appliedLabels.length === 0 && <p>No labels applied.</p>}
+          <div className="label-options">
+            {editableLabels.map((label) => (
+              <label className="label-option" key={label.id}>
+                <Checkbox
+                  checked={labelTarget?.label_ids.includes(label.id) ?? false}
+                  disabled={busyMessageId !== null}
+                  onCheckedChange={(checked) => {
+                    if (labelTarget) void changeLabel(labelTarget, label.id, checked === true)
+                  }}
+                />
+                <span>{label.name}</span>
+              </label>
+            ))}
+            {editableLabels.length === 0 && <p>No editable Gmail labels.</p>}
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={createLabelOpen} onOpenChange={(open) => !open && !creatingLabel && setCreateLabelOpen(false)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create Gmail label</DialogTitle>
+            <DialogDescription>The new label will be available in Gmail and in this sidebar.</DialogDescription>
+          </DialogHeader>
+          <form className="create-label-form" onSubmit={(event) => void submitNewLabel(event)}>
+            <Input aria-label="New label name" placeholder="Label name" value={newLabelName}
+              maxLength={225} disabled={creatingLabel}
+              onChange={(event) => setNewLabelName(event.target.value)} />
+            {createLabelError && <p className="error-message" role="alert">{createLabelError}</p>}
+            <Button type="submit" disabled={creatingLabel || !newLabelName.trim()}>
+              {creatingLabel ? 'Creating…' : 'Create label'}
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={deleteTarget !== null} onOpenChange={(open) => !open && !deletingLabel && setDeleteTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete label {deleteTarget?.name}?</DialogTitle>
+            <DialogDescription>
+              This removes the label from Gmail and from every message that uses it. Messages will not be deleted.
+            </DialogDescription>
+          </DialogHeader>
+          {deleteLabelError && <p className="error-message" role="alert">{deleteLabelError}</p>}
+          <div className="label-delete-actions">
+            <Button variant="outline" disabled={deletingLabel} onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button variant="outline" className="label-delete-confirm" disabled={deletingLabel} onClick={() => void confirmDeleteLabel()}>
+              {deletingLabel ? 'Deleting…' : 'Delete label'}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </main>

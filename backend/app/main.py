@@ -6,7 +6,7 @@ from app.api.mailbox import router as mailbox_router
 from app.services.google_oauth import frontend_url
 
 app = FastAPI()
-app.add_middleware(CORSMiddleware, allow_origins=[frontend_url().rstrip("/")], allow_methods=["GET"], allow_headers=["Accept"])
+app.add_middleware(CORSMiddleware, allow_origins=[frontend_url().rstrip("/")], allow_methods=["GET", "PATCH", "POST", "DELETE"], allow_headers=["Accept", "Content-Type"])
 app.include_router(google_oauth_router)
 app.include_router(mailbox_router)
 

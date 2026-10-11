@@ -47,8 +47,26 @@
   flex: 1;
   gap: 2px;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
   align-content: start;
+}
+
+.label-navigation-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.label-navigation-heading .navigation-item {
+  min-width: 0;
+  flex: 1;
+}
+
+.label-create-button {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  color: var(--text-muted);
 }
 
 .navigation-item {
@@ -97,6 +115,35 @@
 
 .label-item {
   padding-left: 44px;
+}
+
+.label-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.label-row .label-item {
+  min-width: 0;
+  flex: 1;
+}
+
+.label-delete-button {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.label-delete-button:hover,
+.label-delete-confirm {
+  color: var(--state-error);
+}
+
+.label-delete-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .label-name {
@@ -296,6 +343,46 @@
   margin-bottom: 16px;
   color: var(--text-primary);
   font-size: 20px;
+}
+
+.detail-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.detail-actions [data-slot='button'] {
+  gap: 6px;
+}
+
+.label-options {
+  display: grid;
+  gap: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.create-label-form {
+  display: grid;
+  gap: 12px;
+}
+
+.create-label-form [type='submit'] {
+  justify-self: end;
+}
+
+.label-option {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.label-option:hover {
+  background: var(--bg-base);
 }
 
 .message-meta {
